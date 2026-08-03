@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+target_dir="$HOME/.local/share/gnome-shell/extensions/cursor-usage@669px"
+
+if [ "$repo_dir" = "$target_dir" ]; then
+	echo "Refusing to deploy from the installed extension directory"
+	exit 1
+fi
+
+rm -rf "$target_dir"
+mkdir -p "$(dirname "$target_dir")"
+cp -a "$repo_dir"/. "$target_dir"
+rm -rf "$target_dir/.git" "$target_dir/.github"
+glib-compile-schemas "$target_dir/schemas"
+
+echo "Installed to $target_dir"
+echo "Enable with: gnome-extensions enable cursor-usage@669px"
+echo "Wayland: log out and back in. X11: Alt+F2, type r, Enter."

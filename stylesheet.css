@@ -1,0 +1,133 @@
+.cu-panel {
+    spacing: 4px;
+    padding: 0 2px;
+}
+
+.cu-panel-icon {
+    icon-size: 14px;
+}
+
+.cu-ring {
+    width: 16px;
+    height: 16px;
+}
+
+.cu-panel-pct {
+    font-feature-settings: "tnum";
+}
+
+.cu-panel-pct.usage-high {
+    color: #ffa348;
+}
+
+.cu-panel-pct.usage-critical {
+    color: #ff6b6b;
+}
+
+.cu-panel-tier {
+    font-size: 8.5pt;
+    color: rgba(128, 128, 128, 1.0);
+}
+
+.cu-popup {
+    width: 280px;
+    spacing: 0;
+}
+
+.cu-header {
+    spacing: 8px;
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+}
+
+.cu-title {
+    font-weight: bold;
+    font-size: 11pt;
+}
+
+.cu-tier {
+    font-size: 9pt;
+    color: rgba(128, 128, 128, 1.0);
+}
+
+.cu-meter {
+    spacing: 4px;
+    margin-bottom: 10px;
+}
+
+.cu-meter-row {
+    spacing: 8px;
+}
+
+.cu-meter-name {
+    font-size: 10pt;
+}
+
+.cu-meter-pct {
+    font-feature-settings: "tnum";
+    font-size: 10pt;
+}
+
+.cu-track {
+    width: 260px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: rgba(128, 128, 128, 0.25);
+}
+
+.cu-fill {
+    height: 4px;
+    border-radius: 2px;
+    background-color: #33d17a;
+}
+
+.cu-fill.usage-low {
+    background-color: #33d17a;
+}
+
+.cu-fill.usage-high {
+    background-color: #ff7800;
+}
+
+.cu-fill.usage-critical {
+    background-color: #e01b24;
+}
+
+.cu-caption {
+    font-size: 8.5pt;
+    color: rgba(128, 128, 128, 1.0);
+}
+
+.cu-billing {
+    font-size: 8.5pt;
+    color: rgba(128, 128, 128, 1.0);
+    margin: 2px 0 6px 0;
+}
+
+.cu-error {
+    font-size: 9pt;
+    color: #ff9c8a;
+    margin: 4px 0;
+}
+
+.cu-footer {
+    spacing: 10px;
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.cu-updated {
+    font-size: 8.5pt;
+    color: rgba(128, 128, 128, 1.0);
+}
+
+.cu-link {
+    font-size: 8.5pt;
+    color: #62a0ea;
+    padding: 0 2px;
+}
+
+.cu-link:hover {
+    color: #99c1f1;
+}

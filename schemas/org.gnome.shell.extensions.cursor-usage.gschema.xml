@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="cursor-usage">
+  <schema id="org.gnome.shell.extensions.cursor-usage" path="/org/gnome/shell/extensions/cursor-usage/">
+    <key name="refresh-interval" type="i">
+      <default>300</default>
+      <summary>Refresh interval</summary>
+      <description>How often to refresh usage data in seconds</description>
+    </key>
+    <key name="display-mode" type="s">
+      <default>'ring'</default>
+      <summary>Display mode</summary>
+      <description>Panel display: ring or text</description>
+    </key>
+    <key name="panel-window" type="s">
+      <default>'max'</default>
+      <summary>Panel usage pool</summary>
+      <description>Which pool the panel shows: max, auto, api, or total</description>
+    </key>
+    <key name="usage-display" type="s">
+      <default>'used'</default>
+      <summary>Usage value display</summary>
+      <description>Show used or remaining percentages</description>
+    </key>
+    <key name="show-icon" type="b">
+      <default>true</default>
+      <summary>Show icon</summary>
+      <description>Show the Cursor icon in the top bar</description>
+    </key>
+    <key name="show-billing" type="b">
+      <default>false</default>
+      <summary>Show billing line</summary>
+      <description>Show included spend and on-demand usage in the menu</description>
+    </key>
+    <key name="show-tier" type="b">
+      <default>true</default>
+      <summary>Show tier</summary>
+      <description>Show the plan tier in the top bar</description>
+    </key>
+    <key name="proxy-url" type="s">
+      <default>''</default>
+      <summary>Proxy URL</summary>
+      <description>Optional HTTP proxy URL</description>
+    </key>
+  </schema>
+</schemalist>

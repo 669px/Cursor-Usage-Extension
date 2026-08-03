@@ -1,0 +1,11 @@
+{
+  "name": "Cursor Usage",
+  "description": "Show Cursor usage in the GNOME top panel. Reads the local Cursor CLI session and fetches live usage from cursor.com. Not affiliated with Cursor or Anysphere.",
+  "uuid": "cursor-usage@669px",
+  "shell-version": ["46", "47", "48", "49", "50"],
+  "url": "https://github.com/669px/Cursor-Usage-Extension",
+  "settings-schema": "org.gnome.shell.extensions.cursor-usage",
+  "donations": {
+    "github": "669px"
+  }
+}

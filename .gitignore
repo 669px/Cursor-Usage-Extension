@@ -1,0 +1,5 @@
+*.compiled
+*.zip
+.direnv
+.envrc
+*.shell-extension.zip
