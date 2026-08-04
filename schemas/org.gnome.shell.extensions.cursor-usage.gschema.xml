@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<schemalist gettext-domain="cursor-usage">
+<schemalist>
   <schema id="org.gnome.shell.extensions.cursor-usage" path="/org/gnome/shell/extensions/cursor-usage/">
     <key name="refresh-interval" type="i">
       <default>300</default>
@@ -24,7 +24,7 @@
     <key name="show-icon" type="b">
       <default>true</default>
       <summary>Show icon</summary>
-      <description>Show the Cursor icon in the top bar</description>
+      <description>Show the panel icon in the top bar</description>
     </key>
     <key name="show-billing" type="b">
       <default>false</default>

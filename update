@@ -2,19 +2,25 @@
 set -euo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-target_dir="$HOME/.local/share/gnome-shell/extensions/cursor-usage@669px"
+uuid="cursor-usage@669px.github.io"
+target_dir="$HOME/.local/share/gnome-shell/extensions/$uuid"
 
 if [ "$repo_dir" = "$target_dir" ]; then
 	echo "Refusing to deploy from the installed extension directory"
 	exit 1
 fi
 
+# Remove legacy install path from earlier UUID
+rm -rf "$HOME/.local/share/gnome-shell/extensions/cursor-usage@669px"
+
 rm -rf "$target_dir"
 mkdir -p "$(dirname "$target_dir")"
 cp -a "$repo_dir"/. "$target_dir"
 rm -rf "$target_dir/.git" "$target_dir/.github"
+rm -f "$target_dir"/*.shell-extension.zip "$target_dir"/*.zip
+rm -f "$target_dir/schemas/gschemas.compiled"
 glib-compile-schemas "$target_dir/schemas"
 
 echo "Installed to $target_dir"
-echo "Enable with: gnome-extensions enable cursor-usage@669px"
+echo "Enable with: gnome-extensions enable $uuid"
 echo "Wayland: log out and back in. X11: Alt+F2, type r, Enter."

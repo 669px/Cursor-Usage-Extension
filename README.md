@@ -17,7 +17,7 @@ It does **not** call the Cursor CLI as a subprocess. It reads the session token 
 
 1. `~/.config/cursor/auth.json` — Cursor Agent / CLI login (preferred)
 2. `CURSOR_SESSION_TOKEN` env var — optional override
-3. `~/.config/Cursor/User/globalStorage/state.vscdb` — Cursor desktop app (needs `python3`)
+3. `~/.config/Cursor/User/globalStorage/state.vscdb` — Cursor desktop app (needs `sqlite3`)
 
 Usage is fetched from `https://cursor.com/api/usage-summary`.
 
@@ -26,25 +26,23 @@ Usage is fetched from `https://cursor.com/api/usage-summary`.
 - GNOME Shell 46–50
 - Signed in with Cursor CLI (`cursor-agent` / Cursor login) so `~/.config/cursor/auth.json` exists
 
-## Install
+## Install (local)
 
 ```bash
 ./update
-gnome-extensions enable cursor-usage@669px
+gnome-extensions enable cursor-usage@669px.github.io
 ```
 
 Then reload GNOME Shell (Wayland: log out/in, X11: `Alt+F2` → `r`).
 
-Manual:
+## Upload to extensions.gnome.org
 
 ```bash
-install_dir="$HOME/.local/share/gnome-shell/extensions/cursor-usage@669px"
-rm -rf "$install_dir"
-mkdir -p "$(dirname "$install_dir")"
-cp -rT "$PWD" "$install_dir"
-glib-compile-schemas "$install_dir/schemas"
-gnome-extensions enable cursor-usage@669px
+./pack
 ```
+
+Upload the generated `cursor-usage@669px.github.io.shell-extension.zip` at
+https://extensions.gnome.org/upload/
 
 ## Disclaimer
 

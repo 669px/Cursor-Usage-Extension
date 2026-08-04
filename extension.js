@@ -206,10 +206,14 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._session = this._createSession();
         this._lastUsage = null;
         this._countdownTimer = null;
+        this._timerId = null;
+        this._settingsChangedId = null;
+        this._cancellable = null;
+        this._tokenProc = null;
 
         const box = new St.BoxLayout({style_class: 'cu-panel'});
         this._icon = new St.Icon({
-            gicon: Gio.icon_new_for_string(GLib.build_filenamev([this._extensionPath, 'cursor-icon-22.png'])),
+            gicon: Gio.icon_new_for_string(GLib.build_filenamev([this._extensionPath, 'icon-22.png'])),
             style_class: 'cu-panel-icon',
             icon_size: 14,
             y_align: Clutter.ActorAlign.CENTER,
@@ -254,6 +258,27 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._startTimer();
     }
 
+    _cancelPending() {
+        if (this._cancellable && !this._cancellable.is_cancelled())
+            this._cancellable.cancel();
+        this._cancellable = null;
+
+        if (this._tokenProc) {
+            try {
+                this._tokenProc.force_exit();
+            } catch (_e) {
+                // ignore
+            }
+            this._tokenProc = null;
+        }
+    }
+
+    _newCancellable() {
+        this._cancelPending();
+        this._cancellable = new Gio.Cancellable();
+        return this._cancellable;
+    }
+
     _applyPanelChrome() {
         const mode = this._settings.get_string('display-mode');
         this._icon.visible = this._settings.get_boolean('show-icon');
@@ -272,6 +297,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
     }
 
     _recreateSession() {
+        this._cancelPending();
         this._session?.abort();
         this._session = this._createSession();
         this._refreshUsage();
@@ -384,57 +410,60 @@ class CursorUsageIndicator extends PanelMenu.Button {
     }
 
     _refreshUsage() {
+        const cancellable = this._newCancellable();
         const envToken = (GLib.getenv('CURSOR_SESSION_TOKEN') ?? '').trim();
         if (envToken) {
             const token = envToken.includes('::') || envToken.includes('%3A%3A')
                 ? envToken.split(/::|%3A%3A/).pop()
                 : envToken;
-            this._fetchUsage(token);
+            this._fetchUsage(token, cancellable);
             return;
         }
 
         const authFile = Gio.File.new_for_path(this._cliAuthPath());
         if (authFile.query_exists(null)) {
-            authFile.load_contents_async(null, (file, result) => {
+            authFile.load_contents_async(cancellable, (file, result) => {
                 try {
                     const [, contents] = file.load_contents_finish(result);
                     const auth = JSON.parse(new TextDecoder('utf-8').decode(contents));
                     const token = auth.accessToken ?? auth.access_token ?? null;
                     if (!token) {
-                        this._tryDesktopToken();
+                        this._tryDesktopToken(cancellable);
                         return;
                     }
-                    this._fetchUsage(token);
+                    this._fetchUsage(token, cancellable);
                 } catch (_e) {
-                    this._tryDesktopToken();
+                    if (cancellable.is_cancelled())
+                        return;
+                    this._tryDesktopToken(cancellable);
                 }
             });
             return;
         }
 
-        this._tryDesktopToken();
+        this._tryDesktopToken(cancellable);
     }
 
-    _tryDesktopToken() {
+    _tryDesktopToken(cancellable) {
         const dbPath = this._desktopDbPath();
         if (!Gio.File.new_for_path(dbPath).query_exists(null)) {
             this._setUnavailable('-', 'Login required');
             return;
         }
 
+        // Prefer sqlite3 over embedding another language runtime (EGO review).
         try {
             const proc = Gio.Subprocess.new(
                 [
-                    'python3', '-c',
-                    'import sqlite3,sys; db=sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True); '
-                    + 'row=db.execute("SELECT value FROM ItemTable WHERE key=? LIMIT 1", '
-                    + '("cursorAuth/accessToken",)).fetchone(); '
-                    + 'print(row[0] if row and row[0] else "")',
+                    'sqlite3',
                     dbPath,
+                    "SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken' LIMIT 1;",
                 ],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
             );
-            proc.communicate_utf8_async(null, null, (_proc, result) => {
+            this._tokenProc = proc;
+            proc.communicate_utf8_async(null, cancellable, (_proc, result) => {
+                this._tokenProc = null;
                 try {
                     const [, stdout] = proc.communicate_utf8_finish(result);
                     const token = (stdout ?? '').trim();
@@ -442,8 +471,10 @@ class CursorUsageIndicator extends PanelMenu.Button {
                         this._setUnavailable('-', 'No auth');
                         return;
                     }
-                    this._fetchUsage(token);
+                    this._fetchUsage(token, cancellable);
                 } catch (_e) {
+                    if (cancellable.is_cancelled())
+                        return;
                     this._setUnavailable('-', 'No auth');
                 }
             });
@@ -452,7 +483,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
         }
     }
 
-    _fetchUsage(accessToken) {
+    _fetchUsage(accessToken, cancellable) {
         const cookie = sessionCookieFromToken(accessToken);
         if (!cookie) {
             this._setUnavailable('!', 'Bad token');
@@ -466,7 +497,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._session.send_and_read_async(
             message,
             GLib.PRIORITY_DEFAULT,
-            null,
+            cancellable,
             (session, result) => {
                 try {
                     const bytes = session.send_and_read_finish(result);
@@ -478,6 +509,8 @@ class CursorUsageIndicator extends PanelMenu.Button {
                     this._render(this._normalize(data));
                     this._stamp(true);
                 } catch (_e) {
+                    if (cancellable.is_cancelled())
+                        return;
                     this._setUnavailable('!', 'API failed');
                 }
             }
@@ -673,6 +706,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
             GLib.source_remove(this._countdownTimer);
             this._countdownTimer = null;
         }
+        this._cancelPending();
         this.menu.disconnectObject(this);
         this._session?.abort();
         this._session = null;
@@ -680,6 +714,9 @@ class CursorUsageIndicator extends PanelMenu.Button {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
         }
+        this._settings = null;
+        this._openPreferences = null;
+        this._lastUsage = null;
         super.destroy();
     }
 });
