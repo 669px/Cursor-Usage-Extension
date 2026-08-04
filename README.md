@@ -84,15 +84,6 @@ Open from the extension menu (**Prefs**) or GNOME Extensions:
 - Show/hide icon, plan tier, and billing line
 - Optional HTTP proxy URL
 
-## Package for extensions.gnome.org
-
-```bash
-./pack
-```
-
-Upload `cursor-usage@669px.github.io.shell-extension.zip` at  
-https://extensions.gnome.org/upload/
-
 ## Disclaimer
 
 Not affiliated with, funded by, or associated with Cursor or Anysphere.
