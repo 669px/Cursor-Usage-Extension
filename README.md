@@ -20,7 +20,7 @@ Made by [669px](https://github.com/669px)
 
 ## Features
 
-- Auto and API usage percentages in the panel and menu
+- Auto and API usage in the panel and menu
 - Plan tier badge
 - Billing-cycle reset countdown
 - Optional billing line (included + on-demand)
@@ -34,6 +34,20 @@ Made by [669px](https://github.com/669px)
 
 ## Install
 
+### From a release (recommended)
+
+1. Download `cursor-usage@669px.github.io.shell-extension.zip` from the [latest release](https://github.com/669px/Cursor-Usage-Extension/releases/latest).
+2. Install and enable:
+
+```bash
+gnome-extensions install -f cursor-usage@669px.github.io.shell-extension.zip
+gnome-extensions enable cursor-usage@669px.github.io
+```
+
+3. Reload GNOME Shell:
+   - **Wayland** — log out and back in
+   - **X11** — `Alt+F2`, type `r`, Enter
+
 ### From source
 
 ```bash
@@ -43,23 +57,21 @@ cd Cursor-Usage-Extension
 gnome-extensions enable cursor-usage@669px.github.io
 ```
 
-Reload GNOME Shell afterward:
+Same reload step as above (Wayland logout, or X11 `r`).
 
-- **Wayland** — log out and back in
-- **X11** — `Alt+F2`, type `r`, Enter
+On Wayland, `gnome-extensions enable` may say the extension does not exist until you log out and back in — that is expected. After login it should load if it is enabled.
 
-### Manual
+### Pack + install
+
+Useful when you want the same bundle shape as extensions.gnome.org:
 
 ```bash
-uuid="cursor-usage@669px.github.io"
-install_dir="$HOME/.local/share/gnome-shell/extensions/$uuid"
-rm -rf "$install_dir"
-mkdir -p "$(dirname "$install_dir")"
-cp -rT "$PWD" "$install_dir"
-rm -rf "$install_dir/.git"
-glib-compile-schemas "$install_dir/schemas"
-gnome-extensions enable "$uuid"
+./pack
+gnome-extensions install -f cursor-usage@669px.github.io.shell-extension.zip
+gnome-extensions enable cursor-usage@669px.github.io
 ```
+
+Then reload Shell (Wayland logout / X11 `r`).
 
 ## Auth
 
@@ -71,7 +83,7 @@ The extension does **not** spawn the Cursor CLI. It reads a session token alread
 | 2 | `CURSOR_SESSION_TOKEN` — optional environment override |
 | 3 | `~/.config/Cursor/User/globalStorage/state.vscdb` — desktop app (`sqlite3`) |
 
-Usage endpoint: `https://cursor.com/api/usage-summary`
+Sign in with the Cursor CLI / Agent first so `auth.json` exists. Usage endpoint: `https://cursor.com/api/usage-summary`.
 
 ## Preferences
 
@@ -79,10 +91,19 @@ Open from the extension menu (**Prefs**) or GNOME Extensions:
 
 - Refresh interval
 - Ring vs percentage panel display
-- Which pool the panel shows (max / auto / API / total)
+- Which pool the panel shows (most used / auto / API / total)
 - Used vs remaining values
 - Show/hide icon, plan tier, and billing line
 - Optional HTTP proxy URL
+
+## Package for extensions.gnome.org
+
+```bash
+./pack
+```
+
+Upload `cursor-usage@669px.github.io.shell-extension.zip` at  
+https://extensions.gnome.org/upload/
 
 ## Disclaimer
 
