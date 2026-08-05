@@ -147,6 +147,21 @@ class Meter {
         this._fill.style_class = 'cu-fill';
         this._caption.visible = false;
     }
+
+    destroy() {
+        this._caption?.destroy();
+        this._caption = null;
+        this._fill?.destroy();
+        this._fill = null;
+        this._name?.destroy();
+        this._name = null;
+        this._pct?.destroy();
+        this._pct = null;
+        this._track?.destroy();
+        this._track = null;
+        this.root?.destroy();
+        this.root = null;
+    }
 }
 
 const Ring = GObject.registerClass(
@@ -717,6 +732,10 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._settings = null;
         this._openPreferences = null;
         this._lastUsage = null;
+        this._autoMeter?.destroy();
+        this._autoMeter = null;
+        this._apiMeter?.destroy();
+        this._apiMeter = null;
         super.destroy();
     }
 });
