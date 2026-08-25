@@ -9,31 +9,32 @@ namespace cu {
 
 struct Pool {
   double utilization = 0;
-  std::string resetsAt;
+  std::string resetsAt;  // ISO or empty; unix seconds stored as decimal string with prefix 'u:'
+  bool missing = false;
 };
 
-struct UsageData {
-  std::string tier = "CURSOR";
+struct ProviderUsage {
+  std::string id;
+  std::string tier = "AI";
   bool isUnlimited = false;
-  Pool autoPool;
-  Pool apiPool;
-  Pool totalPool;
-  std::optional<double> planIncludedCents;
-  std::optional<double> planBonusCents;
-  bool onDemandEnabled = false;
-  double onDemandUsed = 0;
-  std::optional<double> onDemandLimit;
-};
-
-struct FetchResult {
   bool ok = false;
   std::string error;
-  UsageData data;
+  Pool a;
+  Pool b;
+  Pool total;
+  std::string billing;
 };
 
-FetchResult FetchUsage(const Config& config);
+struct AllUsage {
+  ProviderUsage cursor;
+  ProviderUsage claude;
+  ProviderUsage codex;
+};
+
+AllUsage FetchAllUsage(const Config& config);
 
 double ClampPct(double v);
-const Pool* SelectPool(const UsageData& data, const std::string& panelWindow);
+const Pool* SelectPool(const ProviderUsage& data, const std::string& panelWindow);
+const ProviderUsage* SelectProvider(const AllUsage& all, const Config& config);
 
 }  // namespace cu

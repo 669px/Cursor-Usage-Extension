@@ -305,6 +305,20 @@ static std::optional<std::chrono::system_clock::time_point> ParseIso(const std::
 }
 
 std::string RelativeReset(const std::string& iso) {
+  if (iso.rfind("unix:", 0) == 0) {
+    try {
+      int64_t sec = std::stoll(iso.substr(5));
+      auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                     std::chrono::system_clock::now().time_since_epoch())
+                     .count();
+      auto diff = sec - now;
+      if (diff <= 0)
+        return "resetting";
+      return "resets in " + HumanDuration(diff);
+    } catch (...) {
+      return {};
+    }
+  }
   auto diff = SecondsUntilIso(iso);
   if (!diff)
     return {};
@@ -341,8 +355,8 @@ std::string PlanLabel(const std::string& value) {
   struct Pair { const char* key; const char* label; };
   static const Pair known[] = {
       {"ultra", "ULTRA"}, {"proplus", "PRO+"}, {"business", "BUSINESS"},
-      {"enterprise", "ENT"}, {"pro", "PRO"}, {"free", "FREE"},
-      {"team", "TEAM"}, {"student", "STUDENT"},
+      {"enterprise", "ENT"}, {"pro", "PRO"}, {"max", "MAX"}, {"free", "FREE"},
+      {"team", "TEAM"}, {"student", "STUDENT"}, {"go", "GO"}, {"plus", "PLUS"},
   };
   for (const auto& k : known) {
     if (n.find(k.key) != std::string::npos)

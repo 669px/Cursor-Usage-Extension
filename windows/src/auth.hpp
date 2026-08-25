@@ -5,10 +5,20 @@
 
 namespace cu {
 
-// Resolves a Cursor access token (JWT), not the full session cookie.
-std::optional<std::string> ResolveAccessToken();
-
-// Builds WorkosCursorSessionToken cookie value from a JWT access token.
+// Resolves Cursor JWT access token.
+std::optional<std::string> ResolveCursorToken();
 std::optional<std::string> SessionCookieFromToken(const std::string& accessToken);
+
+struct ClaudeCred {
+  std::string accessToken;
+  std::string subscriptionType;
+};
+std::optional<ClaudeCred> ResolveClaudeCred();
+
+struct CodexCred {
+  std::string accessToken;
+  std::string accountId;
+};
+std::optional<CodexCred> ResolveCodexCred();
 
 }  // namespace cu

@@ -12,8 +12,12 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const USAGE_API_URL = 'https://cursor.com/api/usage-summary';
-const USAGE_PAGE_URL = 'https://cursor.com/dashboard/usage';
+const CURSOR_API_URL = 'https://cursor.com/api/usage-summary';
+const CURSOR_PAGE_URL = 'https://cursor.com/dashboard/usage';
+const CLAUDE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
+const CLAUDE_PAGE_URL = 'https://claude.ai/settings/usage';
+const CODEX_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const CODEX_PAGE_URL = 'https://chatgpt.com/codex';
 const TRACK_WIDTH = 260;
 const RING_SIZE = 16;
 const RING_WIDTH = 2.5;
@@ -53,8 +57,12 @@ function humanDuration(seconds) {
     return `${days}d ${hrs % 24}h`;
 }
 
-function relativeReset(iso) {
-    const target = Date.parse(iso ?? '');
+function relativeReset(isoOrUnix) {
+    let target;
+    if (typeof isoOrUnix === 'number' && Number.isFinite(isoOrUnix))
+        target = isoOrUnix * 1000;
+    else
+        target = Date.parse(isoOrUnix ?? '');
     if (Number.isNaN(target))
         return '';
     const diff = target - Date.now();
@@ -63,20 +71,15 @@ function relativeReset(iso) {
     return `resets in ${humanDuration(diff / 1000)}`;
 }
 
-function planLabel(value) {
+function planLabel(value, fallback = 'AI') {
     const raw = `${value ?? ''}`.trim();
     if (!raw)
-        return 'CURSOR';
+        return fallback;
     const n = raw.toLowerCase().replace(/[\s_-]/g, '');
     const known = [
-        ['ultra', 'ULTRA'],
-        ['proplus', 'PRO+'],
-        ['business', 'BUSINESS'],
-        ['enterprise', 'ENT'],
-        ['pro', 'PRO'],
-        ['free', 'FREE'],
-        ['team', 'TEAM'],
-        ['student', 'STUDENT'],
+        ['ultra', 'ULTRA'], ['proplus', 'PRO+'], ['business', 'BUSINESS'],
+        ['enterprise', 'ENT'], ['pro', 'PRO'], ['max', 'MAX'], ['team', 'TEAM'],
+        ['student', 'STUDENT'], ['free', 'FREE'], ['go', 'GO'], ['plus', 'PLUS'],
     ];
     for (const [key, label] of known) {
         if (n.includes(key))
@@ -115,6 +118,28 @@ function centsLabel(cents) {
     return `$${(cents / 100).toFixed(2)}`;
 }
 
+function pct(value) {
+    const n = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    return Math.min(100, Math.max(0, n));
+}
+
+function pickPool(a, b, mode) {
+    if (mode === 'auto')
+        return a;
+    if (mode === 'api')
+        return b ?? a;
+    if (mode === 'total')
+        return b?.utilization != null && a?.utilization != null
+            ? ((a.utilization >= (b.utilization ?? 0)) ? a : b)
+            : (a ?? b);
+    // max
+    if (!a)
+        return b;
+    if (!b)
+        return a;
+    return (a.utilization ?? 0) >= (b.utilization ?? 0) ? a : b;
+}
+
 class Meter {
     constructor(name) {
         this.root = new St.BoxLayout({vertical: true, style_class: 'cu-meter'});
@@ -148,17 +173,49 @@ class Meter {
         this._caption.visible = false;
     }
 
+    setVisible(v) {
+        this.root.visible = v;
+    }
+
     destroy() {
-        this._caption?.destroy();
-        this._caption = null;
-        this._fill?.destroy();
-        this._fill = null;
-        this._name?.destroy();
-        this._name = null;
-        this._pct?.destroy();
-        this._pct = null;
-        this._track?.destroy();
-        this._track = null;
+        this.root?.destroy();
+        this.root = null;
+    }
+}
+
+class ProviderBlock {
+    constructor(title) {
+        this.root = new St.BoxLayout({vertical: true, style_class: 'cu-provider'});
+        const header = new St.BoxLayout({style_class: 'cu-header'});
+        this._title = new St.Label({text: title, style_class: 'cu-title', x_expand: true});
+        this._tier = new St.Label({text: '', style_class: 'cu-tier'});
+        header.add_child(this._title);
+        header.add_child(this._tier);
+        this.root.add_child(header);
+        this.meterA = new Meter('A');
+        this.meterB = new Meter('B');
+        this.root.add_child(this.meterA.root);
+        this.root.add_child(this.meterB.root);
+        this._billing = new St.Label({text: '', style_class: 'cu-billing'});
+        this._billing.visible = false;
+        this.root.add_child(this._billing);
+        this._error = new St.Label({text: '', style_class: 'cu-error'});
+        this._error.visible = false;
+        this.root.add_child(this._error);
+    }
+
+    setMeterNames(a, b) {
+        this.meterA._name.text = a;
+        this.meterB._name.text = b;
+    }
+
+    setVisible(v) {
+        this.root.visible = v;
+    }
+
+    destroy() {
+        this.meterA?.destroy();
+        this.meterB?.destroy();
         this.root?.destroy();
         this.root = null;
     }
@@ -214,17 +271,18 @@ class Ring extends St.DrawingArea {
 const CursorUsageIndicator = GObject.registerClass(
 class CursorUsageIndicator extends PanelMenu.Button {
     _init(extensionPath, settings, openPreferences) {
-        super._init(0.0, 'Cursor Usage');
+        super._init(0.0, 'AI Usage');
         this._extensionPath = extensionPath;
         this._settings = settings;
         this._openPreferences = openPreferences;
         this._session = this._createSession();
-        this._lastUsage = null;
+        this._last = {cursor: null, claude: null, codex: null};
         this._countdownTimer = null;
         this._timerId = null;
         this._settingsChangedId = null;
         this._cancellable = null;
         this._tokenProc = null;
+        this._pending = 0;
 
         const box = new St.BoxLayout({style_class: 'cu-panel'});
         this._icon = new St.Icon({
@@ -260,8 +318,16 @@ class CursorUsageIndicator extends PanelMenu.Button {
                 this._recreateSession();
             else if (key === 'show-icon' || key === 'show-tier' || key === 'display-mode')
                 this._applyPanelChrome();
-            else if (key === 'usage-display' || key === 'panel-window' || key === 'show-billing')
-                this._renderFromLastUsage();
+            else if (
+                key === 'usage-display' || key === 'panel-window' || key === 'panel-provider' ||
+                key === 'show-billing' || key === 'show-cursor' || key === 'show-claude' ||
+                key === 'show-codex'
+            ) {
+                this._applyProviderVisibility();
+                this._renderAll();
+                if (key.startsWith('show-'))
+                    this._refreshUsage();
+            }
         });
 
         this.menu.connectObject('open-state-changed', (_menu, open) => {
@@ -277,7 +343,6 @@ class CursorUsageIndicator extends PanelMenu.Button {
         if (this._cancellable && !this._cancellable.is_cancelled())
             this._cancellable.cancel();
         this._cancellable = null;
-
         if (this._tokenProc) {
             try {
                 this._tokenProc.force_exit();
@@ -298,9 +363,14 @@ class CursorUsageIndicator extends PanelMenu.Button {
         const mode = this._settings.get_string('display-mode');
         this._icon.visible = this._settings.get_boolean('show-icon');
         this._ring.visible = mode === 'ring';
-        this._label.visible = true;
         this._panelTier.visible = this._settings.get_boolean('show-tier');
         this._renderPanel();
+    }
+
+    _applyProviderVisibility() {
+        this._cursorBlock.setVisible(this._settings.get_boolean('show-cursor'));
+        this._claudeBlock.setVisible(this._settings.get_boolean('show-claude'));
+        this._codexBlock.setVisible(this._settings.get_boolean('show-codex'));
     }
 
     _createSession() {
@@ -324,25 +394,16 @@ class CursorUsageIndicator extends PanelMenu.Button {
         item.add_child(root);
         this.menu.addMenuItem(item);
 
-        const header = new St.BoxLayout({style_class: 'cu-header'});
-        this._title = new St.Label({text: 'Cursor', style_class: 'cu-title', x_expand: true});
-        this._tier = new St.Label({text: '', style_class: 'cu-tier'});
-        header.add_child(this._title);
-        header.add_child(this._tier);
-        root.add_child(header);
-
-        this._autoMeter = new Meter('Auto');
-        this._apiMeter = new Meter('API');
-        root.add_child(this._autoMeter.root);
-        root.add_child(this._apiMeter.root);
-
-        this._billing = new St.Label({text: '', style_class: 'cu-billing'});
-        this._billing.visible = false;
-        root.add_child(this._billing);
-
-        this._error = new St.Label({text: '', style_class: 'cu-error'});
-        this._error.visible = false;
-        root.add_child(this._error);
+        this._cursorBlock = new ProviderBlock('Cursor');
+        this._cursorBlock.setMeterNames('Auto', 'API');
+        this._claudeBlock = new ProviderBlock('Claude');
+        this._claudeBlock.setMeterNames('5h', '7d');
+        this._codexBlock = new ProviderBlock('Codex');
+        this._codexBlock.setMeterNames('Primary', 'Weekly');
+        root.add_child(this._cursorBlock.root);
+        root.add_child(this._claudeBlock.root);
+        root.add_child(this._codexBlock.root);
+        this._applyProviderVisibility();
 
         const footer = new St.BoxLayout({style_class: 'cu-footer'});
         this._updated = new St.Label({
@@ -353,41 +414,31 @@ class CursorUsageIndicator extends PanelMenu.Button {
         });
         footer.add_child(this._updated);
 
-        const refresh = new St.Button({
-            label: 'Refresh',
-            style_class: 'cu-link',
-            can_focus: true,
-            reactive: true,
-            track_hover: true,
-        });
-        refresh.connect('clicked', () => this._refreshUsage());
-        footer.add_child(refresh);
-
-        const open = new St.Button({
-            label: 'Open',
-            style_class: 'cu-link',
-            can_focus: true,
-            reactive: true,
-            track_hover: true,
-        });
-        open.connect('clicked', () => {
+        const mkLink = (label, fn) => {
+            const btn = new St.Button({
+                label,
+                style_class: 'cu-link',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            btn.connect('clicked', fn);
+            footer.add_child(btn);
+            return btn;
+        };
+        mkLink('Refresh', () => this._refreshUsage());
+        mkLink('Open', () => {
             this.menu.close();
-            Gio.AppInfo.launch_default_for_uri(USAGE_PAGE_URL, null);
+            const p = this._settings.get_string('panel-provider');
+            const url = p === 'claude' ? CLAUDE_PAGE_URL
+                : p === 'codex' ? CODEX_PAGE_URL
+                    : CURSOR_PAGE_URL;
+            Gio.AppInfo.launch_default_for_uri(url, null);
         });
-        footer.add_child(open);
-
-        const prefs = new St.Button({
-            label: 'Prefs',
-            style_class: 'cu-link',
-            can_focus: true,
-            reactive: true,
-            track_hover: true,
-        });
-        prefs.connect('clicked', () => {
+        mkLink('Prefs', () => {
             this.menu.close();
             this._openPreferences();
         });
-        footer.add_child(prefs);
         root.add_child(footer);
     }
 
@@ -414,6 +465,36 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._startTimer();
     }
 
+    _refreshUsage() {
+        const cancellable = this._newCancellable();
+        this._pending = 0;
+        if (this._settings.get_boolean('show-cursor')) {
+            this._pending++;
+            this._refreshCursor(cancellable);
+        }
+        if (this._settings.get_boolean('show-claude')) {
+            this._pending++;
+            this._refreshClaude(cancellable);
+        }
+        if (this._settings.get_boolean('show-codex')) {
+            this._pending++;
+            this._refreshCodex(cancellable);
+        }
+        if (this._pending === 0) {
+            this._label.text = '-';
+            this._ring.setUnknown();
+            this._stamp(false);
+        }
+    }
+
+    _doneOne() {
+        this._pending = Math.max(0, this._pending - 1);
+        if (this._pending === 0)
+            this._stamp(true);
+    }
+
+    // --- Cursor ---
+
     _cliAuthPath() {
         return GLib.build_filenamev([GLib.get_home_dir(), '.config', 'cursor', 'auth.json']);
     }
@@ -424,17 +505,15 @@ class CursorUsageIndicator extends PanelMenu.Button {
         ]);
     }
 
-    _refreshUsage() {
-        const cancellable = this._newCancellable();
+    _refreshCursor(cancellable) {
         const envToken = (GLib.getenv('CURSOR_SESSION_TOKEN') ?? '').trim();
         if (envToken) {
             const token = envToken.includes('::') || envToken.includes('%3A%3A')
                 ? envToken.split(/::|%3A%3A/).pop()
                 : envToken;
-            this._fetchUsage(token, cancellable);
+            this._fetchCursor(token, cancellable);
             return;
         }
-
         const authFile = Gio.File.new_for_path(this._cliAuthPath());
         if (authFile.query_exists(null)) {
             authFile.load_contents_async(cancellable, (file, result) => {
@@ -446,7 +525,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
                         this._tryDesktopToken(cancellable);
                         return;
                     }
-                    this._fetchUsage(token, cancellable);
+                    this._fetchCursor(token, cancellable);
                 } catch (_e) {
                     if (cancellable.is_cancelled())
                         return;
@@ -455,23 +534,20 @@ class CursorUsageIndicator extends PanelMenu.Button {
             });
             return;
         }
-
         this._tryDesktopToken(cancellable);
     }
 
     _tryDesktopToken(cancellable) {
         const dbPath = this._desktopDbPath();
         if (!Gio.File.new_for_path(dbPath).query_exists(null)) {
-            this._setUnavailable('-', 'Login required');
+            this._setProviderUnavailable('cursor', 'Login required');
+            this._doneOne();
             return;
         }
-
-        // Prefer sqlite3 over embedding another language runtime (EGO review).
         try {
             const proc = Gio.Subprocess.new(
                 [
-                    'sqlite3',
-                    dbPath,
+                    'sqlite3', dbPath,
                     "SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken' LIMIT 1;",
                 ],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
@@ -483,32 +559,273 @@ class CursorUsageIndicator extends PanelMenu.Button {
                     const [, stdout] = proc.communicate_utf8_finish(result);
                     const token = (stdout ?? '').trim();
                     if (!token) {
-                        this._setUnavailable('-', 'No auth');
+                        this._setProviderUnavailable('cursor', 'No auth');
+                        this._doneOne();
                         return;
                     }
-                    this._fetchUsage(token, cancellable);
+                    this._fetchCursor(token, cancellable);
                 } catch (_e) {
                     if (cancellable.is_cancelled())
                         return;
-                    this._setUnavailable('-', 'No auth');
+                    this._setProviderUnavailable('cursor', 'No auth');
+                    this._doneOne();
                 }
             });
         } catch (_e) {
-            this._setUnavailable('-', 'No auth');
+            this._setProviderUnavailable('cursor', 'No auth');
+            this._doneOne();
         }
     }
 
-    _fetchUsage(accessToken, cancellable) {
+    _fetchCursor(accessToken, cancellable) {
         const cookie = sessionCookieFromToken(accessToken);
         if (!cookie) {
-            this._setUnavailable('!', 'Bad token');
+            this._setProviderUnavailable('cursor', 'Bad token');
+            this._doneOne();
             return;
         }
+        this._httpGet(CURSOR_API_URL, {
+            Cookie: `WorkosCursorSessionToken=${cookie}`,
+            'User-Agent': 'cursor-usage-extension',
+        }, cancellable, (ok, data, err) => {
+            if (!ok) {
+                this._setProviderUnavailable('cursor', err);
+                this._doneOne();
+                return;
+            }
+            this._last.cursor = this._normalizeCursor(data);
+            this._renderProvider('cursor');
+            this._renderPanel();
+            this._scheduleCountdown();
+            this._doneOne();
+        });
+    }
 
-        const message = Soup.Message.new('GET', USAGE_API_URL);
-        message.request_headers.append('Cookie', `WorkosCursorSessionToken=${cookie}`);
-        message.request_headers.append('User-Agent', 'cursor-usage-extension');
+    _normalizeCursor(data) {
+        const plan = data.individualUsage?.plan ?? {};
+        const onDemand = data.individualUsage?.onDemand ?? null;
+        const end = data.billingCycleEnd ?? null;
+        const fromMsg = msg => {
+            const m = `${msg ?? ''}`.match(/([\d.]+)\s*%/);
+            return m ? Number(m[1]) : null;
+        };
+        const auto = pct(plan.autoPercentUsed ?? fromMsg(data.autoModelSelectedDisplayMessage));
+        const api = pct(plan.apiPercentUsed ?? fromMsg(data.namedModelSelectedDisplayMessage));
+        const total = pct(plan.totalPercentUsed ?? Math.max(auto, api));
+        return {
+            id: 'cursor',
+            tier: planLabel(data.membershipType, 'CURSOR'),
+            isUnlimited: !!data.isUnlimited,
+            a: {name: 'Auto', utilization: auto, resets_at: end},
+            b: {name: 'API', utilization: api, resets_at: end},
+            total: {utilization: total, resets_at: end},
+            billing: (() => {
+                if (!this._settings.get_boolean('show-billing'))
+                    return '';
+                const parts = [];
+                if (plan.enabled && plan.breakdown?.included != null) {
+                    let t = centsLabel(plan.breakdown.included);
+                    if (plan.breakdown.bonus)
+                        t += ` + ${centsLabel(plan.breakdown.bonus)} bonus`;
+                    parts.push(t);
+                }
+                if (onDemand?.enabled) {
+                    const lim = onDemand.limit == null ? '∞' : centsLabel(onDemand.limit);
+                    parts.push(`on-demand ${centsLabel(onDemand.used ?? 0)} / ${lim}`);
+                }
+                return parts.join(' · ');
+            })(),
+        };
+    }
 
+    // --- Claude ---
+
+    _claudeCredPath() {
+        return GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credentials.json']);
+    }
+
+    _refreshClaude(cancellable) {
+        const env = (GLib.getenv('CLAUDE_CODE_OAUTH_TOKEN') ?? '').trim();
+        if (env) {
+            this._fetchClaude(env, planLabel(null, 'CLAUDE'), cancellable);
+            return;
+        }
+        const file = Gio.File.new_for_path(this._claudeCredPath());
+        if (!file.query_exists(null)) {
+            this._setProviderUnavailable('claude', 'Login required');
+            this._doneOne();
+            return;
+        }
+        file.load_contents_async(cancellable, (_f, result) => {
+            try {
+                const [, contents] = file.load_contents_finish(result);
+                const auth = JSON.parse(new TextDecoder('utf-8').decode(contents));
+                const oauth = auth.claudeAiOauth ?? null;
+                const token = oauth?.accessToken ?? null;
+                if (!token) {
+                    this._setProviderUnavailable('claude', 'No OAuth');
+                    this._doneOne();
+                    return;
+                }
+                this._fetchClaude(token, planLabel(oauth.subscriptionType, 'CLAUDE'), cancellable);
+            } catch (_e) {
+                if (cancellable.is_cancelled())
+                    return;
+                this._setProviderUnavailable('claude', 'No auth');
+                this._doneOne();
+            }
+        });
+    }
+
+    _fetchClaude(token, tier, cancellable) {
+        this._httpGet(CLAUDE_API_URL, {
+            Authorization: `Bearer ${token}`,
+            'anthropic-beta': 'oauth-2025-04-20',
+            'User-Agent': 'claude-code/2.1.72',
+            'Content-Type': 'application/json',
+        }, cancellable, (ok, data, err) => {
+            if (!ok) {
+                this._setProviderUnavailable('claude', err);
+                this._doneOne();
+                return;
+            }
+            this._last.claude = this._normalizeClaude(data, tier);
+            this._renderProvider('claude');
+            this._renderPanel();
+            this._scheduleCountdown();
+            this._doneOne();
+        });
+    }
+
+    _normalizeClaude(data, tier) {
+        const five = data.five_hour ?? null;
+        const seven = data.seven_day ?? null;
+        let billing = '';
+        if (this._settings.get_boolean('show-billing') && data.extra_usage?.is_enabled) {
+            const u = data.extra_usage;
+            billing = `extra ${pct(u.utilization).toFixed(0)}%`;
+            if (u.used_credits != null && u.monthly_limit != null)
+                billing = `extra ${u.used_credits} / ${u.monthly_limit}`;
+        }
+        return {
+            id: 'claude',
+            tier,
+            isUnlimited: false,
+            a: {
+                name: '5h',
+                utilization: pct(five?.utilization),
+                resets_at: five?.resets_at ?? null,
+            },
+            b: {
+                name: '7d',
+                utilization: pct(seven?.utilization),
+                resets_at: seven?.resets_at ?? null,
+            },
+            total: {
+                utilization: Math.max(pct(five?.utilization), pct(seven?.utilization)),
+                resets_at: seven?.resets_at ?? five?.resets_at ?? null,
+            },
+            billing,
+        };
+    }
+
+    // --- Codex ---
+
+    _codexAuthPath() {
+        return GLib.build_filenamev([GLib.get_home_dir(), '.codex', 'auth.json']);
+    }
+
+    _refreshCodex(cancellable) {
+        const file = Gio.File.new_for_path(this._codexAuthPath());
+        if (!file.query_exists(null)) {
+            this._setProviderUnavailable('codex', 'Login required');
+            this._doneOne();
+            return;
+        }
+        file.load_contents_async(cancellable, (_f, result) => {
+            try {
+                const [, contents] = file.load_contents_finish(result);
+                const auth = JSON.parse(new TextDecoder('utf-8').decode(contents));
+                const token = auth.tokens?.access_token ?? auth.access_token ?? null;
+                const accountId = auth.tokens?.account_id ?? auth.account_id ?? null;
+                if (!token) {
+                    this._setProviderUnavailable('codex', 'No auth');
+                    this._doneOne();
+                    return;
+                }
+                this._fetchCodex(token, accountId, cancellable);
+            } catch (_e) {
+                if (cancellable.is_cancelled())
+                    return;
+                this._setProviderUnavailable('codex', 'No auth');
+                this._doneOne();
+            }
+        });
+    }
+
+    _fetchCodex(token, accountId, cancellable) {
+        const headers = {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+            'User-Agent': 'cursor-usage-extension',
+        };
+        if (accountId)
+            headers['ChatGPT-Account-Id'] = accountId;
+        this._httpGet(CODEX_API_URL, headers, cancellable, (ok, data, err) => {
+            if (!ok) {
+                this._setProviderUnavailable('codex', err);
+                this._doneOne();
+                return;
+            }
+            this._last.codex = this._normalizeCodex(data);
+            this._renderProvider('codex');
+            this._renderPanel();
+            this._scheduleCountdown();
+            this._doneOne();
+        });
+    }
+
+    _normalizeCodex(data) {
+        const primary = data.rate_limit?.primary_window ?? null;
+        const secondary = data.rate_limit?.secondary_window ?? null;
+        const toPool = (win, name) => {
+            if (!win)
+                return null;
+            return {
+                name,
+                utilization: pct(win.used_percent),
+                resets_at: typeof win.reset_at === 'number' ? win.reset_at : null,
+            };
+        };
+        const a = toPool(primary, 'Primary') ?? {name: 'Primary', utilization: 0, resets_at: null};
+        const b = toPool(secondary, 'Weekly');
+        let billing = '';
+        if (this._settings.get_boolean('show-billing') && data.credits?.has_credits) {
+            if (data.credits.unlimited)
+                billing = 'credits unlimited';
+            else if (data.credits.balance != null)
+                billing = `credits $${Number(data.credits.balance).toFixed(2)}`;
+        }
+        return {
+            id: 'codex',
+            tier: planLabel(data.plan_type, 'CODEX'),
+            isUnlimited: !!data.credits?.unlimited,
+            a,
+            b: b ?? {name: 'Weekly', utilization: 0, resets_at: null, missing: true},
+            total: {
+                utilization: Math.max(a.utilization, b?.utilization ?? 0),
+                resets_at: b?.resets_at ?? a.resets_at,
+            },
+            billing,
+        };
+    }
+
+    // --- HTTP ---
+
+    _httpGet(url, headers, cancellable, cb) {
+        const message = Soup.Message.new('GET', url);
+        for (const [k, v] of Object.entries(headers))
+            message.request_headers.append(k, v);
         this._session.send_and_read_async(
             message,
             GLib.PRIORITY_DEFAULT,
@@ -517,123 +834,49 @@ class CursorUsageIndicator extends PanelMenu.Button {
                 try {
                     const bytes = session.send_and_read_finish(result);
                     if (message.status_code !== 200) {
-                        this._setUnavailable('!', `HTTP ${message.status_code}`);
+                        cb(false, null, `HTTP ${message.status_code}`);
                         return;
                     }
                     const data = JSON.parse(new TextDecoder('utf-8').decode(bytes.get_data()));
-                    this._render(this._normalize(data));
-                    this._stamp(true);
+                    cb(true, data, null);
                 } catch (_e) {
                     if (cancellable.is_cancelled())
                         return;
-                    this._setUnavailable('!', 'API failed');
+                    cb(false, null, 'API failed');
                 }
             }
         );
     }
 
-    _normalize(data) {
-        const plan = data.individualUsage?.plan ?? {};
-        const onDemand = data.individualUsage?.onDemand ?? null;
-        const end = data.billingCycleEnd ?? null;
-        const startMs = Date.parse(data.billingCycleStart ?? '');
-        const endMs = Date.parse(end ?? '');
-        const cycleSeconds = !Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs
-            ? (endMs - startMs) / 1000
-            : null;
+    // --- Render ---
 
-        const fromMsg = msg => {
-            const m = `${msg ?? ''}`.match(/([\d.]+)\s*%/);
-            return m ? Number(m[1]) : null;
-        };
-
-        const auto = this._pct(plan.autoPercentUsed ?? fromMsg(data.autoModelSelectedDisplayMessage));
-        const api = this._pct(plan.apiPercentUsed ?? fromMsg(data.namedModelSelectedDisplayMessage));
-        const total = this._pct(plan.totalPercentUsed ?? Math.max(auto, api));
-
-        return {
-            tier: planLabel(data.membershipType),
-            isUnlimited: !!data.isUnlimited,
-            cycleSeconds,
-            auto: {utilization: auto, resets_at: end},
-            api: {utilization: api, resets_at: end},
-            total: {utilization: total, resets_at: end},
-            onDemand: onDemand?.enabled
-                ? {used: onDemand.used ?? 0, limit: onDemand.limit}
-                : null,
-            planSpend: plan.enabled
-                ? {
-                    included: plan.breakdown?.included ?? null,
-                    bonus: plan.breakdown?.bonus ?? null,
-                }
-                : null,
-        };
+    _blockFor(id) {
+        return id === 'claude' ? this._claudeBlock
+            : id === 'codex' ? this._codexBlock
+                : this._cursorBlock;
     }
 
-    _setUnavailable(label, detail) {
-        this._lastUsage = null;
-        this._label.text = label;
-        this._label.style_class = 'cu-panel-pct usage-high';
-        this._ring.setUnknown();
-        this._autoMeter.setMuted(detail);
-        this._apiMeter.setMuted('-');
-        this._billing.visible = false;
-        this._error.text = detail;
-        this._error.visible = true;
-        this._stamp(false);
-        this._scheduleCountdown();
-    }
-
-    _render(data) {
-        this._lastUsage = data;
-        this._error.visible = false;
-        this._tier.text = data.tier;
-        this._panelTier.text = data.tier;
-
-        if (data.isUnlimited) {
-            this._autoMeter.setMuted('unlimited');
-            this._apiMeter.setMuted('unlimited');
-        } else {
-            this._applyMeter(this._autoMeter, data.auto);
-            this._applyMeter(this._apiMeter, data.api);
-        }
-
-        this._renderBilling(data);
+    _setProviderUnavailable(id, detail) {
+        this._last[id] = null;
+        const block = this._blockFor(id);
+        block._tier.text = '';
+        block.meterA.setVisible(true);
+        block.meterB.setVisible(false);
+        block.meterA.setMuted(detail);
+        block._billing.visible = false;
+        block._billing.text = '';
+        block._error.text = '';
+        block._error.visible = false;
         this._renderPanel();
-        this._scheduleCountdown();
-    }
-
-    _renderFromLastUsage() {
-        if (this._lastUsage)
-            this._render(this._lastUsage);
-    }
-
-    _renderBilling(data) {
-        if (!this._settings.get_boolean('show-billing')) {
-            this._billing.visible = false;
-            return;
-        }
-        const parts = [];
-        if (data.planSpend?.included != null) {
-            let t = centsLabel(data.planSpend.included);
-            if (data.planSpend.bonus)
-                t += ` + ${centsLabel(data.planSpend.bonus)} bonus`;
-            parts.push(t);
-        }
-        if (data.onDemand) {
-            const lim = data.onDemand.limit == null ? '∞' : centsLabel(data.onDemand.limit);
-            parts.push(`on-demand ${centsLabel(data.onDemand.used)} / ${lim}`);
-        }
-        this._billing.text = parts.join(' · ');
-        this._billing.visible = parts.length > 0;
     }
 
     _applyMeter(meter, win) {
-        if (!win) {
-            meter.setMuted();
+        if (!win || win.missing) {
+            meter.setVisible(false);
             return;
         }
-        const util = this._pct(win.utilization);
+        meter.setVisible(true);
+        const util = pct(win.utilization);
         const display = this._settings.get_string('usage-display') === 'remaining'
             ? 100 - util
             : util;
@@ -643,38 +886,97 @@ class CursorUsageIndicator extends PanelMenu.Button {
         meter.setValue(util, relativeReset(win.resets_at), display, suffix);
     }
 
-    _selectedWindow() {
-        const u = this._lastUsage;
-        if (!u)
-            return null;
-        switch (this._settings.get_string('panel-window')) {
-        case 'api':
-            return u.api;
-        case 'total':
-            return u.total;
-        case 'max':
-            return (u.api?.utilization ?? 0) > (u.auto?.utilization ?? 0) ? u.api : u.auto;
-        case 'auto':
-        default:
-            return u.auto;
+    _renderProvider(id) {
+        const data = this._last[id];
+        const block = this._blockFor(id);
+        if (!data) {
+            this._setProviderUnavailable(id, '-');
+            return;
         }
+        block._error.visible = false;
+        block._error.text = '';
+        block._tier.text = data.tier;
+        if (data.isUnlimited) {
+            block.meterA.setVisible(true);
+            block.meterB.setVisible(true);
+            block.meterA.setMuted('unlimited');
+            block.meterB.setMuted('unlimited');
+        } else {
+            this._applyMeter(block.meterA, data.a);
+            this._applyMeter(block.meterB, data.b);
+        }
+        block._billing.text = data.billing ?? '';
+        block._billing.visible = !!(data.billing && this._settings.get_boolean('show-billing'));
+    }
+
+    _renderAll() {
+        for (const id of ['cursor', 'claude', 'codex']) {
+            if (this._last[id])
+                this._renderProvider(id);
+        }
+        this._renderPanel();
+    }
+
+    _selectedSnapshot() {
+        const mode = this._settings.get_string('panel-provider');
+        const enabled = [];
+        if (this._settings.get_boolean('show-cursor') && this._last.cursor)
+            enabled.push(this._last.cursor);
+        if (this._settings.get_boolean('show-claude') && this._last.claude)
+            enabled.push(this._last.claude);
+        if (this._settings.get_boolean('show-codex') && this._last.codex)
+            enabled.push(this._last.codex);
+        if (!enabled.length)
+            return null;
+        if (mode === 'cursor')
+            return this._last.cursor;
+        if (mode === 'claude')
+            return this._last.claude;
+        if (mode === 'codex')
+            return this._last.codex;
+        // max across providers
+        let best = null;
+        let bestUtil = -1;
+        for (const snap of enabled) {
+            const win = this._poolFromSnap(snap);
+            const u = win?.utilization ?? 0;
+            if (u > bestUtil) {
+                bestUtil = u;
+                best = snap;
+            }
+        }
+        return best;
+    }
+
+    _poolFromSnap(snap) {
+        if (!snap)
+            return null;
+        const mode = this._settings.get_string('panel-window');
+        if (snap.isUnlimited)
+            return {utilization: 0, unlimited: true};
+        if (mode === 'total')
+            return snap.total ?? pickPool(snap.a, snap.b, 'max');
+        return pickPool(snap.a, snap.b, mode);
     }
 
     _renderPanel() {
-        const win = this._selectedWindow();
-        if (!win) {
+        const snap = this._selectedSnapshot();
+        if (!snap) {
             this._label.text = '-';
             this._label.style_class = 'cu-panel-pct';
             this._ring.setUnknown();
+            this._panelTier.text = '';
             return;
         }
-        if (this._lastUsage?.isUnlimited) {
+        this._panelTier.text = this._settings.get_boolean('show-tier') ? snap.tier : '';
+        if (snap.isUnlimited) {
             this._label.text = '∞';
             this._label.style_class = 'cu-panel-pct usage-low';
             this._ring.setValue(0);
             return;
         }
-        const util = this._pct(win.utilization);
+        const win = this._poolFromSnap(snap);
+        const util = pct(win?.utilization);
         const display = this._settings.get_string('usage-display') === 'remaining'
             ? 100 - util
             : util;
@@ -688,10 +990,14 @@ class CursorUsageIndicator extends PanelMenu.Button {
             GLib.source_remove(this._countdownTimer);
             this._countdownTimer = null;
         }
-        const end = this._lastUsage?.auto?.resets_at;
-        if (!end)
+        const snap = this._selectedSnapshot();
+        const end = snap?.a?.resets_at ?? snap?.b?.resets_at;
+        if (end == null)
             return;
-        const seconds = (Date.parse(end) - Date.now()) / 1000;
+        const target = typeof end === 'number' ? end * 1000 : Date.parse(end);
+        if (Number.isNaN(target))
+            return;
+        const seconds = (target - Date.now()) / 1000;
         if (!(seconds > 0))
             return;
         this._countdownTimer = GLib.timeout_add_seconds(
@@ -699,15 +1005,11 @@ class CursorUsageIndicator extends PanelMenu.Button {
             seconds < 90 ? 1 : 30,
             () => {
                 this._countdownTimer = null;
-                this._renderFromLastUsage();
+                this._renderAll();
+                this._scheduleCountdown();
                 return GLib.SOURCE_REMOVE;
             }
         );
-    }
-
-    _pct(value) {
-        const n = typeof value === 'number' && Number.isFinite(value) ? value : 0;
-        return Math.min(100, Math.max(0, n));
     }
 
     _stamp(ok) {
@@ -731,11 +1033,13 @@ class CursorUsageIndicator extends PanelMenu.Button {
         }
         this._settings = null;
         this._openPreferences = null;
-        this._lastUsage = null;
-        this._autoMeter?.destroy();
-        this._autoMeter = null;
-        this._apiMeter?.destroy();
-        this._apiMeter = null;
+        this._last = {cursor: null, claude: null, codex: null};
+        this._cursorBlock?.destroy();
+        this._claudeBlock?.destroy();
+        this._codexBlock?.destroy();
+        this._cursorBlock = null;
+        this._claudeBlock = null;
+        this._codexBlock = null;
         super.destroy();
     }
 });

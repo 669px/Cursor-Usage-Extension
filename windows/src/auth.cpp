@@ -19,9 +19,9 @@ static std::optional<std::string> TokenFromAuthJson(const std::wstring& path) {
   return token;
 }
 
-static std::optional<std::string> TokenFromEnv() {
+static std::optional<std::string> TokenFromEnv(const wchar_t* name) {
   wchar_t buf[4096];
-  DWORD n = GetEnvironmentVariableW(L"CURSOR_SESSION_TOKEN", buf, 4096);
+  DWORD n = GetEnvironmentVariableW(name, buf, 4096);
   if (n == 0 || n >= 4096)
     return std::nullopt;
   std::wstring w(buf);
@@ -29,24 +29,13 @@ static std::optional<std::string> TokenFromEnv() {
     w.pop_back();
   if (w.empty())
     return std::nullopt;
-
-  std::string env = WideToUtf8(w);
-  auto cut = env.find("::");
-  if (cut == std::string::npos)
-    cut = env.find("%3A%3A");
-  if (cut != std::string::npos) {
-    if (env.compare(cut, 2, "::") == 0)
-      return env.substr(cut + 2);
-    return env.substr(cut + 6);
-  }
-  return env;
+  return WideToUtf8(w);
 }
 
 static std::optional<std::string> TokenFromSqlite(const std::wstring& dbPath) {
   if (!FileExists(dbPath))
     return std::nullopt;
 
-  // Prefer sqlite3 on PATH (same approach as the GNOME extension).
   std::wstring cmd = L"sqlite3 \"" + dbPath +
                      L"\" \"SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken' LIMIT 1;\"";
 
@@ -65,8 +54,8 @@ static std::optional<std::string> TokenFromSqlite(const std::wstring& dbPath) {
 
   PROCESS_INFORMATION pi{};
   std::wstring mutableCmd = cmd;
-  BOOL ok = CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
-                           CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+  BOOL ok = CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                           nullptr, nullptr, &si, &pi);
   CloseHandle(writePipe);
   if (!ok) {
     CloseHandle(readPipe);
@@ -91,9 +80,19 @@ static std::optional<std::string> TokenFromSqlite(const std::wstring& dbPath) {
   return out;
 }
 
-std::optional<std::string> ResolveAccessToken() {
-  if (auto env = TokenFromEnv())
-    return env;
+std::optional<std::string> ResolveCursorToken() {
+  if (auto env = TokenFromEnv(L"CURSOR_SESSION_TOKEN")) {
+    std::string e = *env;
+    auto cut = e.find("::");
+    if (cut == std::string::npos)
+      cut = e.find("%3A%3A");
+    if (cut != std::string::npos) {
+      if (e.compare(cut, 2, "::") == 0)
+        return e.substr(cut + 2);
+      return e.substr(cut + 6);
+    }
+    return e;
+  }
 
   const std::wstring candidates[] = {
       HomeDir() + L"\\.cursor\\auth.json",
@@ -105,8 +104,7 @@ std::optional<std::string> ResolveAccessToken() {
       return t;
   }
 
-  const std::wstring db = AppDataDir() + L"\\Cursor\\User\\globalStorage\\state.vscdb";
-  return TokenFromSqlite(db);
+  return TokenFromSqlite(AppDataDir() + L"\\Cursor\\User\\globalStorage\\state.vscdb");
 }
 
 std::optional<std::string> SessionCookieFromToken(const std::string& accessToken) {
@@ -120,6 +118,38 @@ std::optional<std::string> SessionCookieFromToken(const std::string& accessToken
   if (pipe != std::string::npos)
     sub = sub.substr(pipe + 1);
   return sub + "%3A%3A" + accessToken;
+}
+
+std::optional<ClaudeCred> ResolveClaudeCred() {
+  if (auto env = TokenFromEnv(L"CLAUDE_CODE_OAUTH_TOKEN"))
+    return ClaudeCred{*env, "CLAUDE"};
+
+  auto raw = ReadFileUtf8(HomeDir() + L"\\.claude\\.credentials.json");
+  if (!raw)
+    return std::nullopt;
+  auto oauth = JsonObject(*raw, "claudeAiOauth");
+  if (oauth.empty())
+    return std::nullopt;
+  auto token = JsonString(oauth, "accessToken");
+  if (token.empty())
+    return std::nullopt;
+  return ClaudeCred{token, JsonString(oauth, "subscriptionType")};
+}
+
+std::optional<CodexCred> ResolveCodexCred() {
+  auto raw = ReadFileUtf8(HomeDir() + L"\\.codex\\auth.json");
+  if (!raw)
+    return std::nullopt;
+  auto tokens = JsonObject(*raw, "tokens");
+  auto token = JsonString(tokens, "access_token");
+  if (token.empty())
+    token = JsonString(*raw, "access_token");
+  if (token.empty())
+    return std::nullopt;
+  auto account = JsonString(tokens, "account_id");
+  if (account.empty())
+    account = JsonString(*raw, "account_id");
+  return CodexCred{token, account};
 }
 
 }  // namespace cu

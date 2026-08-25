@@ -8,7 +8,7 @@ export default class CursorUsagePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         const page = new Adw.PreferencesPage({
-            title: 'Cursor Usage',
+            title: 'AI Usage',
             icon_name: 'preferences-system-symbolic',
         });
         window.add(page);
@@ -18,7 +18,7 @@ export default class CursorUsagePreferences extends ExtensionPreferences {
 
         const refresh = new Adw.SpinRow({
             title: 'Refresh interval',
-            subtitle: 'Seconds between updates',
+            subtitle: 'Seconds between updates (keep ≥120 for Claude)',
             adjustment: new Gtk.Adjustment({
                 lower: 10,
                 upper: 600,
@@ -29,6 +29,19 @@ export default class CursorUsagePreferences extends ExtensionPreferences {
         });
         settings.bind('refresh-interval', refresh, 'value', Gio.SettingsBindFlags.DEFAULT);
         general.add(refresh);
+
+        const providers = new Adw.PreferencesGroup({title: 'Providers'});
+        page.add(providers);
+
+        for (const [key, title, subtitle] of [
+            ['show-cursor', 'Cursor', 'cursor.com usage summary'],
+            ['show-claude', 'Claude', 'Claude Code OAuth usage'],
+            ['show-codex', 'Codex', 'ChatGPT / Codex rate limits'],
+        ]) {
+            const row = new Adw.SwitchRow({title, subtitle});
+            settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
+            providers.add(row);
+        }
 
         const display = new Adw.PreferencesGroup({title: 'Panel'});
         page.add(display);
@@ -47,14 +60,36 @@ export default class CursorUsagePreferences extends ExtensionPreferences {
         });
         display.add(modeRow);
 
+        const providerRow = new Adw.ComboRow({
+            title: 'Panel provider',
+            subtitle: 'Which service the panel percentage follows',
+        });
+        const providerModel = new Gtk.StringList();
+        providerModel.append('Most used');
+        providerModel.append('Cursor');
+        providerModel.append('Claude');
+        providerModel.append('Codex');
+        providerRow.set_model(providerModel);
+        const pp = settings.get_string('panel-provider');
+        providerRow.set_selected(
+            pp === 'cursor' ? 1 : pp === 'claude' ? 2 : pp === 'codex' ? 3 : 0
+        );
+        providerRow.connect('notify::selected', () => {
+            settings.set_string(
+                'panel-provider',
+                ['max', 'cursor', 'claude', 'codex'][providerRow.get_selected()]
+            );
+        });
+        display.add(providerRow);
+
         const poolRow = new Adw.ComboRow({
             title: 'Panel pool',
-            subtitle: 'Which usage value the panel shows',
+            subtitle: 'Pool within the provider (Cursor Auto/API, Claude 5h/7d, Codex primary/weekly)',
         });
         const poolModel = new Gtk.StringList();
         poolModel.append('Most used');
-        poolModel.append('Auto');
-        poolModel.append('API');
+        poolModel.append('Primary / Auto / 5h');
+        poolModel.append('Secondary / API / 7d');
         poolModel.append('Total');
         poolRow.set_model(poolModel);
         const pool = settings.get_string('panel-window');
@@ -78,15 +113,11 @@ export default class CursorUsagePreferences extends ExtensionPreferences {
         });
         display.add(usageRow);
 
-        const showIcon = new Adw.SwitchRow({
-            title: 'Show icon',
-        });
+        const showIcon = new Adw.SwitchRow({title: 'Show icon'});
         settings.bind('show-icon', showIcon, 'active', Gio.SettingsBindFlags.DEFAULT);
         display.add(showIcon);
 
-        const showTier = new Adw.SwitchRow({
-            title: 'Show plan tier',
-        });
+        const showTier = new Adw.SwitchRow({title: 'Show plan tier'});
         settings.bind('show-tier', showTier, 'active', Gio.SettingsBindFlags.DEFAULT);
         display.add(showTier);
 
@@ -94,8 +125,8 @@ export default class CursorUsagePreferences extends ExtensionPreferences {
         page.add(menu);
 
         const billing = new Adw.SwitchRow({
-            title: 'Show billing line',
-            subtitle: 'Included spend and on-demand usage',
+            title: 'Show billing / credits line',
+            subtitle: 'Cursor spend, Claude extra usage, Codex credits',
         });
         settings.bind('show-billing', billing, 'active', Gio.SettingsBindFlags.DEFAULT);
         menu.add(billing);

@@ -15,6 +15,7 @@ typedef ULONG PROPID;
 #include <shellapi.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -108,6 +109,10 @@ struct SettingsState {
   HWND remainingCheck = nullptr;
   HWND compactCheck = nullptr;
   HWND hiddenCheck = nullptr;
+  HWND cursorCheck = nullptr;
+  HWND claudeCheck = nullptr;
+  HWND codexCheck = nullptr;
+  HWND providerCombo = nullptr;
   HWND poolCombo = nullptr;
   HWND opacityEdit = nullptr;
   HWND proxyEdit = nullptr;
@@ -142,20 +147,41 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
           reinterpret_cast<HMENU>(100), nullptr, nullptr);
       y += 34;
 
-      check(state->billingCheck, 101, L"Show billing line", state->config->showBilling);
+      check(state->billingCheck, 101, L"Show billing / credits", state->config->showBilling);
       check(state->tierCheck, 102, L"Show plan tier", state->config->showTier);
       check(state->remainingCheck, 103, L"Show remaining percentage",
             state->config->usageDisplay == "remaining");
+      check(state->cursorCheck, 110, L"Show Cursor", state->config->showCursor);
+      check(state->claudeCheck, 111, L"Show Claude", state->config->showClaude);
+      check(state->codexCheck, 112, L"Show Codex", state->config->showCodex);
       check(state->compactCheck, 106, L"Start in compact mode", state->config->startCompact);
       check(state->hiddenCheck, 107, L"Start hidden in tray", state->config->startHidden);
+
+      label(L"Panel provider");
+      state->providerCombo = CreateWindowW(
+          L"COMBOBOX", nullptr, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 16, y, 220,
+          120, hwnd, reinterpret_cast<HMENU>(109), nullptr, nullptr);
+      SendMessageW(state->providerCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Most used"));
+      SendMessageW(state->providerCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Cursor"));
+      SendMessageW(state->providerCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Claude"));
+      SendMessageW(state->providerCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Codex"));
+      int psel = 0;
+      if (state->config->panelProvider == "cursor")
+        psel = 1;
+      else if (state->config->panelProvider == "claude")
+        psel = 2;
+      else if (state->config->panelProvider == "codex")
+        psel = 3;
+      SendMessageW(state->providerCombo, CB_SETCURSEL, psel, 0);
+      y += 34;
 
       label(L"Panel pool");
       state->poolCombo = CreateWindowW(
           L"COMBOBOX", nullptr, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 16, y, 220,
           120, hwnd, reinterpret_cast<HMENU>(104), nullptr, nullptr);
       SendMessageW(state->poolCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Most used"));
-      SendMessageW(state->poolCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Auto"));
-      SendMessageW(state->poolCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"API"));
+      SendMessageW(state->poolCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Primary / Auto / 5h"));
+      SendMessageW(state->poolCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Secondary / API / 7d"));
       SendMessageW(state->poolCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Total"));
       int sel = 0;
       if (state->config->panelWindow == "auto")
@@ -203,6 +229,16 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             SendMessageW(state->compactCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
         state->config->startHidden =
             SendMessageW(state->hiddenCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        state->config->showCursor =
+            SendMessageW(state->cursorCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        state->config->showClaude =
+            SendMessageW(state->claudeCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        state->config->showCodex =
+            SendMessageW(state->codexCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        int psel = static_cast<int>(SendMessageW(state->providerCombo, CB_GETCURSEL, 0, 0));
+        const char* providers[] = {"max", "cursor", "claude", "codex"};
+        if (psel >= 0 && psel < 4)
+          state->config->panelProvider = providers[psel];
         int sel = static_cast<int>(SendMessageW(state->poolCombo, CB_GETCURSEL, 0, 0));
         const char* pools[] = {"max", "auto", "api", "total"};
         if (sel >= 0 && sel < 4)
@@ -254,8 +290,30 @@ int Widget::Width() const {
   return S(expanded_ ? kExpandedW : kCompactW);
 }
 
+int Widget::ExpandedContentHeight() const {
+  // Header + footer + per enabled provider (title + meters + optional billing)
+  int h = 52 + 40;  // header summary + footer
+  auto addProvider = [&](bool enabled, const ProviderUsage& p) {
+    if (!enabled)
+      return;
+    h += 18;  // title
+    h += 42;  // meter A
+    if (!(p.ok && p.b.missing))
+      h += 42;  // meter B
+    if (config_.showBilling && p.ok && !p.billing.empty())
+      h += 14;
+    h += 8;  // gap
+  };
+  addProvider(config_.showCursor, usage_.cursor);
+  addProvider(config_.showClaude, usage_.claude);
+  addProvider(config_.showCodex, usage_.codex);
+  if (!config_.showCursor && !config_.showClaude && !config_.showCodex)
+    h += 40;
+  return (std::max)(kExpandedHMin, h);
+}
+
 int Widget::Height() const {
-  return S(expanded_ ? kExpandedH : kCompactH);
+  return S(expanded_ ? ExpandedContentHeight() : kCompactH);
 }
 
 void Widget::ApplyShape() {
@@ -272,9 +330,7 @@ void Widget::Relayout(bool keepTopLeft) {
   GetWindowRect(hwnd_, &rc);
   int x = rc.left;
   int y = rc.top;
-  if (!keepTopLeft) {
-    // Grow downward / right from top-left; already correct.
-  }
+  (void)keepTopLeft;
   SetWindowPos(hwnd_, nullptr, x, y, Width(), Height(), SWP_NOZORDER | SWP_NOACTIVATE);
   ApplyShape();
   InvalidateRect(hwnd_, nullptr, FALSE);
@@ -355,20 +411,24 @@ double Widget::DisplayPct(double util) const {
 }
 
 std::wstring Widget::SummaryLabel() const {
-  if (!hasUsage_)
+  const ProviderUsage* snap = SelectProvider(usage_, config_);
+  if (!snap)
     return error_.empty() ? L"..." : Utf8ToWide(error_);
-  if (usage_.isUnlimited)
+  if (snap->isUnlimited)
     return L"∞";
-  const Pool* p = SelectPool(usage_, config_.panelWindow);
+  const Pool* p = SelectPool(*snap, config_.panelWindow);
   if (!p)
     return L"-";
   return std::to_wstring(static_cast<int>(std::lround(DisplayPct(p->utilization)))) + L"%";
 }
 
 COLORREF Widget::SummaryColor() const {
-  if (!hasUsage_ || usage_.isUnlimited)
-    return hasUsage_ ? kLow : kHigh;
-  const Pool* p = SelectPool(usage_, config_.panelWindow);
+  const ProviderUsage* snap = SelectProvider(usage_, config_);
+  if (!snap)
+    return kHigh;
+  if (snap->isUnlimited)
+    return kLow;
+  const Pool* p = SelectPool(*snap, config_.panelWindow);
   return SeverityColor(p ? p->utilization : 0);
 }
 
@@ -511,7 +571,13 @@ LRESULT Widget::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
       }
       if (hit == Hit::Open) {
-        OpenUrl(L"https://cursor.com/dashboard/usage");
+        const ProviderUsage* snap = SelectProvider(usage_, config_);
+        std::wstring url = L"https://cursor.com/dashboard/usage";
+        if (snap && snap->id == "claude")
+          url = L"https://claude.ai/settings/usage";
+        else if (snap && snap->id == "codex")
+          url = L"https://chatgpt.com/codex";
+        OpenUrl(url);
         return 0;
       }
       if (hit == Hit::Prefs) {
@@ -559,7 +625,7 @@ LRESULT Widget::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
       }
       return 0;
     case kMsgRefreshDone: {
-      auto* result = reinterpret_cast<FetchResult*>(lParam);
+      auto* result = reinterpret_cast<AllUsage*>(lParam);
       ApplyUsage(*result);
       delete result;
       refreshing_ = false;
@@ -585,9 +651,16 @@ LRESULT Widget::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case 1001:
           RefreshAsync();
           break;
-        case 1002:
-          OpenUrl(L"https://cursor.com/dashboard/usage");
+        case 1002: {
+          const ProviderUsage* snap = SelectProvider(usage_, config_);
+          std::wstring url = L"https://cursor.com/dashboard/usage";
+          if (snap && snap->id == "claude")
+            url = L"https://claude.ai/settings/usage";
+          else if (snap && snap->id == "codex")
+            url = L"https://chatgpt.com/codex";
+          OpenUrl(url);
           break;
+        }
         case 1003:
           OpenSettings();
           break;
@@ -692,10 +765,11 @@ void Widget::Paint(HDC hdc) {
     const float ringR = static_cast<float>(S(8));
     const float ringX = static_cast<float>(S(18));
     const float ringY = expanded_ ? static_cast<float>(S(22)) : static_cast<float>(h) * 0.5f;
+    const ProviderUsage* snap = SelectProvider(usage_, config_);
     double util = 0;
     bool known = false;
-    if (hasUsage_ && !usage_.isUnlimited) {
-      if (const Pool* p = SelectPool(usage_, config_.panelWindow)) {
+    if (snap && !snap->isUnlimited) {
+      if (const Pool* p = SelectPool(*snap, config_.panelWindow)) {
         util = p->utilization;
         known = true;
       }
@@ -705,111 +779,118 @@ void Widget::Paint(HDC hdc) {
     if (!expanded_) {
       auto label = SummaryLabel();
       Gdiplus::SolidBrush pctBrush(ToGp(SummaryColor()));
-      g.DrawString(label.c_str(), -1, &pctFont, Gdiplus::PointF(ringX + ringR + S(8), S(10)),
-                   &pctBrush);
-      if (config_.showTier && hasUsage_) {
-        auto tier = Utf8ToWide(usage_.tier);
+      Gdiplus::RectF lb;
+      g.MeasureString(label.c_str(), -1, &pctFont, Gdiplus::PointF(0, 0), &lb);
+      float textX = ringX + ringR + S(8);
+      float textY = (static_cast<float>(h) - lb.Height) * 0.5f;
+      g.DrawString(label.c_str(), -1, &pctFont, Gdiplus::PointF(textX, textY), &pctBrush);
+      if (config_.showTier && snap) {
+        auto tier = Utf8ToWide(snap->tier);
         Gdiplus::RectF tb;
         g.MeasureString(tier.c_str(), -1, &smallFont, Gdiplus::PointF(0, 0), &tb);
-        g.DrawString(tier.c_str(), -1, &smallFont,
-                     Gdiplus::PointF(static_cast<float>(ChromeRect(false).left) - tb.Width - S(6),
-                                     S(12)),
-                     &mutedBrush);
+        float maxRight = static_cast<float>(ChromeRect(false).left) - S(6);
+        float tierX = maxRight - tb.Width;
+        if (tierX > textX + lb.Width + S(4)) {
+          g.DrawString(tier.c_str(), -1, &smallFont,
+                       Gdiplus::PointF(tierX, (static_cast<float>(h) - tb.Height) * 0.5f),
+                       &mutedBrush);
+        }
       }
     } else {
-      g.DrawString(L"Cursor", -1, &titleFont, Gdiplus::PointF(ringX + ringR + S(8), S(12)),
+      g.DrawString(L"AI Usage", -1, &titleFont, Gdiplus::PointF(ringX + ringR + S(8), S(10)),
                    &textBrush);
-      if (config_.showTier && hasUsage_) {
-        auto tier = Utf8ToWide(usage_.tier);
-        Gdiplus::RectF tb;
-        g.MeasureString(tier.c_str(), -1, &bodyFont, Gdiplus::PointF(0, 0), &tb);
-        g.DrawString(tier.c_str(), -1, &bodyFont,
-                     Gdiplus::PointF(static_cast<float>(ChromeRect(false).left) - tb.Width - S(8),
-                                     S(14)),
-                     &mutedBrush);
-      }
-
       auto summary = SummaryLabel();
       Gdiplus::SolidBrush pctBrush(ToGp(SummaryColor()));
       g.DrawString(summary.c_str(), -1, &pctFont,
-                   Gdiplus::PointF(ringX + ringR + S(8), S(30)), &pctBrush);
+                   Gdiplus::PointF(ringX + ringR + S(8), S(26)), &pctBrush);
 
-      float y = static_cast<float>(S(58));
+      float y = static_cast<float>(S(48));
+      const float footerTop = static_cast<float>(h - S(40));
+
       auto drawMeter = [&](const wchar_t* name, const Pool& pool, bool muted,
-                           const std::string& mutedText) {
+                           const std::string& mutedText, bool unlimited) -> bool {
+        if (y + S(36) > footerTop)
+          return false;
         g.DrawString(name, -1, &bodyFont, Gdiplus::PointF(static_cast<float>(S(14)), y), &textBrush);
-
         std::wstring right;
         double u = pool.utilization;
-        if (muted) {
+        if (muted)
           right = Utf8ToWide(mutedText);
-        } else if (usage_.isUnlimited) {
+        else if (unlimited) {
           right = L"unlimited";
           u = 0;
-        } else {
+        } else if (pool.missing)
+          right = L"n/a";
+        else
           right = std::to_wstring(static_cast<int>(std::lround(DisplayPct(u)))) +
                   (config_.usageDisplay == "remaining" ? L"% left" : L"% used");
-        }
-
         Gdiplus::RectF rb;
         g.MeasureString(right.c_str(), -1, &bodyFont, Gdiplus::PointF(0, 0), &rb);
         g.DrawString(right.c_str(), -1, &bodyFont,
                      Gdiplus::PointF(static_cast<float>(w - S(14)) - rb.Width, y),
                      muted ? &mutedBrush : &textBrush);
-        y += S(20);
-
+        y += S(16);
         Gdiplus::SolidBrush track(ToGp(kTrack));
         float trackW = static_cast<float>(w - S(28));
-        DrawRoundRect(g, Gdiplus::RectF(static_cast<float>(S(14)), y, trackW, static_cast<float>(S(5))),
+        DrawRoundRect(g, Gdiplus::RectF(static_cast<float>(S(14)), y, trackW, static_cast<float>(S(4))),
                       static_cast<float>(S(2)), track);
-        if (!muted && !usage_.isUnlimited) {
+        if (!muted && !unlimited && !pool.missing) {
           float fillW = static_cast<float>((ClampPct(u) / 100.0) * trackW);
           if (fillW > 0) {
             Gdiplus::SolidBrush fill(ToGp(SeverityColor(u)));
             DrawRoundRect(g,
                           Gdiplus::RectF(static_cast<float>(S(14)), y, fillW,
-                                         static_cast<float>(S(5))),
+                                         static_cast<float>(S(4))),
                           static_cast<float>(S(2)), fill);
           }
         }
-        y += S(10);
-
-        if (!muted && !pool.resetsAt.empty()) {
+        y += S(6);
+        if (!muted && !pool.missing && !pool.resetsAt.empty()) {
           auto cap = Utf8ToWide(RelativeReset(pool.resetsAt));
-          if (!cap.empty())
+          if (!cap.empty() && y + S(12) <= footerTop) {
             g.DrawString(cap.c_str(), -1, &smallFont,
                          Gdiplus::PointF(static_cast<float>(S(14)), y), &mutedBrush);
+            y += S(12);
+          }
         }
-        y += S(22);
+        y += S(4);
+        return true;
       };
 
-      if (!error_.empty() && !hasUsage_) {
-        drawMeter(L"Auto", {}, true, error_);
-        drawMeter(L"API", {}, true, "-");
-      } else {
-        drawMeter(L"Auto", usage_.autoPool, false, "");
-        drawMeter(L"API", usage_.apiPool, false, "");
-      }
+      auto drawProvider = [&](const wchar_t* title, const ProviderUsage& p, bool enabled,
+                              const wchar_t* aName, const wchar_t* bName) {
+        if (!enabled || y + S(20) > footerTop)
+          return;
+        g.DrawString(title, -1, &titleFont, Gdiplus::PointF(static_cast<float>(S(14)), y),
+                     &textBrush);
+        if (config_.showTier && p.ok) {
+          auto tier = Utf8ToWide(p.tier);
+          Gdiplus::RectF tb;
+          g.MeasureString(tier.c_str(), -1, &smallFont, Gdiplus::PointF(0, 0), &tb);
+          g.DrawString(tier.c_str(), -1, &smallFont,
+                       Gdiplus::PointF(static_cast<float>(w - S(14)) - tb.Width, y + 1),
+                       &mutedBrush);
+        }
+        y += S(16);
+        if (!p.ok) {
+          drawMeter(aName, {}, true, p.error.empty() ? "—" : p.error, false);
+        } else {
+          drawMeter(aName, p.a, false, "", p.isUnlimited);
+          if (!p.b.missing)
+            drawMeter(bName, p.b, false, "", p.isUnlimited);
+          if (config_.showBilling && !p.billing.empty() && y + S(12) <= footerTop) {
+            auto billing = Utf8ToWide(p.billing);
+            g.DrawString(billing.c_str(), -1, &smallFont,
+                         Gdiplus::PointF(static_cast<float>(S(14)), y), &mutedBrush);
+            y += S(12);
+          }
+        }
+        y += S(6);
+      };
 
-      if (config_.showBilling && hasUsage_) {
-        std::string parts;
-        if (usage_.planIncludedCents) {
-          parts = CentsLabel(*usage_.planIncludedCents);
-          if (usage_.planBonusCents && *usage_.planBonusCents != 0)
-            parts += " + " + CentsLabel(*usage_.planBonusCents) + " bonus";
-        }
-        if (usage_.onDemandEnabled) {
-          if (!parts.empty())
-            parts += " · ";
-          std::string lim = usage_.onDemandLimit ? CentsLabel(*usage_.onDemandLimit) : "∞";
-          parts += "on-demand " + CentsLabel(usage_.onDemandUsed) + " / " + lim;
-        }
-        if (!parts.empty()) {
-          auto billing = Utf8ToWide(parts);
-          g.DrawString(billing.c_str(), -1, &smallFont,
-                       Gdiplus::PointF(static_cast<float>(S(14)), y), &mutedBrush);
-        }
-      }
+      drawProvider(L"Cursor", usage_.cursor, config_.showCursor, L"Auto", L"API");
+      drawProvider(L"Claude", usage_.claude, config_.showClaude, L"5h", L"7d");
+      drawProvider(L"Codex", usage_.codex, config_.showCodex, L"Primary", L"Weekly");
 
       Gdiplus::Pen sep(ToGp(kBorder), 1);
       g.DrawLine(&sep, S(14), h - S(36), w - S(14), h - S(36));
@@ -847,7 +928,7 @@ void Widget::RefreshAsync() {
   HWND hwnd = hwnd_;
   Config cfg = config_;
   std::thread([hwnd, cfg]() {
-    auto* result = new FetchResult(FetchUsage(cfg));
+    auto* result = new AllUsage(FetchAllUsage(cfg));
     if (!IsWindow(hwnd)) {
       delete result;
       return;
@@ -856,26 +937,48 @@ void Widget::RefreshAsync() {
   }).detach();
 }
 
-void Widget::ApplyUsage(const FetchResult& result) {
-  if (!result.ok) {
-    if (!hasUsage_)
-      error_ = result.error;
-    statusLine_ = (hasUsage_ ? "Offline " : "Checked ") + FormatTimeNow();
-    return;
+void Widget::ApplyUsage(const AllUsage& result) {
+  usage_ = result;
+  hasUsage_ = usage_.cursor.ok || usage_.claude.ok || usage_.codex.ok;
+  if (!hasUsage_) {
+    error_ = usage_.cursor.error;
+    if (error_.empty())
+      error_ = usage_.claude.error;
+    if (error_.empty())
+      error_ = usage_.codex.error;
+    if (error_.empty())
+      error_ = "No providers";
+    statusLine_ = "Checked " + FormatTimeNow();
+  } else {
+    error_.clear();
+    statusLine_ = "Updated " + FormatTimeNow();
   }
-  hasUsage_ = true;
-  error_.clear();
-  usage_ = result.data;
-  statusLine_ = "Updated " + FormatTimeNow();
+  if (expanded_)
+    Relayout(true);
 }
 
 void Widget::ScheduleCountdown() {
   KillTimer(hwnd_, kTimerCountdown);
   UINT ms = 30000;
-  if (hasUsage_) {
-    auto secs = SecondsUntilIso(usage_.autoPool.resetsAt);
-    if (secs && *secs > 0 && *secs < 90)
-      ms = 1000;
+  if (const ProviderUsage* snap = SelectProvider(usage_, config_)) {
+    const Pool* p = SelectPool(*snap, config_.panelWindow);
+    if (p && !p->resetsAt.empty()) {
+      if (p->resetsAt.rfind("unix:", 0) == 0) {
+        try {
+          long long sec = std::stoll(p->resetsAt.substr(5));
+          auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+          if (sec - now > 0 && sec - now < 90)
+            ms = 1000;
+        } catch (...) {
+        }
+      } else {
+        auto secs = SecondsUntilIso(p->resetsAt);
+        if (secs && *secs > 0 && *secs < 90)
+          ms = 1000;
+      }
+    }
   }
   SetTimer(hwnd_, kTimerCountdown, ms, nullptr);
 }
@@ -909,10 +1012,12 @@ HICON Widget::MakeTrayIcon() {
     g.Clear(Gdiplus::Color(0, 0, 0, 0));
     double util = 0;
     bool known = false;
-    if (hasUsage_ && !usage_.isUnlimited) {
-      if (const Pool* p = SelectPool(usage_, config_.panelWindow)) {
-        util = p->utilization;
-        known = true;
+    if (const ProviderUsage* snap = SelectProvider(usage_, config_)) {
+      if (!snap->isUnlimited) {
+        if (const Pool* p = SelectPool(*snap, config_.panelWindow)) {
+          util = p->utilization;
+          known = true;
+        }
       }
     }
     DrawRing(&g, 8, 8, 5.5f, 2.f, util, known);
@@ -949,7 +1054,7 @@ void Widget::CreateTray() {
   nid_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   nid_.uCallbackMessage = kTrayMsg;
   nid_.hIcon = trayIcon_;
-  CopyTip(nid_.szTip, sizeof(nid_.szTip) / sizeof(nid_.szTip[0]), L"Cursor Usage");
+  CopyTip(nid_.szTip, sizeof(nid_.szTip) / sizeof(nid_.szTip[0]), L"AI Usage");
   trayAdded_ = Shell_NotifyIconW(NIM_ADD, &nid_) == TRUE;
 }
 
@@ -969,18 +1074,18 @@ void Widget::UpdateTray() {
     CreateTray();
     return;
   }
-  std::wstring tip = L"Cursor Usage";
-  if (hasUsage_) {
-    if (usage_.isUnlimited) {
-      tip = L"Cursor Usage — unlimited";
-    } else if (const Pool* p = SelectPool(usage_, config_.panelWindow)) {
-      tip = L"Cursor Usage — " +
+  std::wstring tip = L"AI Usage";
+  if (const ProviderUsage* snap = SelectProvider(usage_, config_)) {
+    if (snap->isUnlimited) {
+      tip = L"AI Usage — unlimited";
+    } else if (const Pool* p = SelectPool(*snap, config_.panelWindow)) {
+      tip = L"AI Usage — " +
             std::to_wstring(static_cast<int>(std::lround(DisplayPct(p->utilization)))) + L"%";
       if (config_.showTier)
-        tip += L" · " + Utf8ToWide(usage_.tier);
+        tip += L" · " + Utf8ToWide(snap->tier);
     }
   } else if (!error_.empty()) {
-    tip = L"Cursor Usage — " + Utf8ToWide(error_);
+    tip = L"AI Usage — " + Utf8ToWide(error_);
   }
   if (tip.size() >= 127)
     tip.resize(127);
@@ -1040,7 +1145,7 @@ void Widget::OpenSettings() {
 
   HWND dlg =
       CreateWindowExW(WS_EX_DLGMODALFRAME, L"CursorUsageSettings", L"Preferences",
-                      WS_CAPTION | WS_SYSMENU | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 360, 520,
+                      WS_CAPTION | WS_SYSMENU | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 360, 680,
                       hwnd_, nullptr, instance_, &state);
   if (!dlg)
     return;
@@ -1064,7 +1169,7 @@ void Widget::OpenSettings() {
   ApplyOpacity();
   KillTimer(hwnd_, kTimerRefresh);
   SetTimer(hwnd_, kTimerRefresh, static_cast<UINT>(config_.refreshIntervalSec) * 1000, nullptr);
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  Relayout(true);
   RefreshAsync();
 }
 

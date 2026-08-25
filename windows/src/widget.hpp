@@ -42,6 +42,7 @@ class Widget {
   int S(int v) const;
   int Width() const;
   int Height() const;
+  int ExpandedContentHeight() const;
   void ApplyShape();
   void ApplyOpacity();
   void Relayout(bool keepTopLeft);
@@ -50,7 +51,7 @@ class Widget {
   void DrawRing(void* graphics, float cx, float cy, float radius, float stroke, double util,
                 bool known) const;
   void RefreshAsync();
-  void ApplyUsage(const FetchResult& result);
+  void ApplyUsage(const AllUsage& result);
   void ScheduleCountdown();
   void UpdateTray();
   void CreateTray();
@@ -73,7 +74,7 @@ class Widget {
   HINSTANCE instance_ = nullptr;
   HWND hwnd_ = nullptr;
   Config config_;
-  UsageData usage_;
+  AllUsage usage_{};
   bool hasUsage_ = false;
   std::string statusLine_ = "Loading...";
   std::string error_;
@@ -93,10 +94,10 @@ class Widget {
   POINT dragStart_{};
   POINT windowStart_{};
 
-  static constexpr int kCompactW = 176;
-  static constexpr int kCompactH = 42;
-  static constexpr int kExpandedW = 304;
-  static constexpr int kExpandedH = 268;
+  static constexpr int kCompactW = 188;
+  static constexpr int kCompactH = 44;
+  static constexpr int kExpandedW = 308;
+  static constexpr int kExpandedHMin = 200;
 
   static constexpr UINT kTimerRefresh = 1;
   static constexpr UINT kTimerCountdown = 2;

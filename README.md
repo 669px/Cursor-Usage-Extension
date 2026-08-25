@@ -37,11 +37,9 @@ Reload Shell (Wayland logout, or X11 `Alt+F2` → `r`).
 
 Floating Win32 card + tray icon. Same providers and auth idea.
 
-<<<<<<< HEAD
-See [windows/README.md](windows/README.md) for build steps (CMake + MSVC or MinGW).
-=======
 Binary: `CursorUsage.exe` on the release page, or build under [`windows/`](windows/).
->>>>>>> 5ffb4f0 (Point docs at the renamed AI-Usage-Extension repository.)
+
+See [windows/README.md](windows/README.md) for build steps (CMake + MSVC or MinGW).
 
 ## Disclaimer
 

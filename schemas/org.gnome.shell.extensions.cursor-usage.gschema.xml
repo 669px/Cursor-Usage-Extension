@@ -11,10 +11,15 @@
       <summary>Display mode</summary>
       <description>Panel display: ring or text</description>
     </key>
+    <key name="panel-provider" type="s">
+      <default>'max'</default>
+      <summary>Panel provider</summary>
+      <description>Which provider drives the panel: max, cursor, claude, or codex</description>
+    </key>
     <key name="panel-window" type="s">
       <default>'max'</default>
       <summary>Panel usage pool</summary>
-      <description>Which pool the panel shows: max, auto, api, or total</description>
+      <description>Which pool within a provider: max, auto, api, or total</description>
     </key>
     <key name="usage-display" type="s">
       <default>'used'</default>
@@ -29,12 +34,27 @@
     <key name="show-billing" type="b">
       <default>false</default>
       <summary>Show billing line</summary>
-      <description>Show included spend and on-demand usage in the menu</description>
+      <description>Show Cursor billing / Claude extra / Codex credits when available</description>
     </key>
     <key name="show-tier" type="b">
       <default>true</default>
       <summary>Show tier</summary>
       <description>Show the plan tier in the top bar</description>
+    </key>
+    <key name="show-cursor" type="b">
+      <default>true</default>
+      <summary>Show Cursor</summary>
+      <description>Fetch and show Cursor usage</description>
+    </key>
+    <key name="show-claude" type="b">
+      <default>true</default>
+      <summary>Show Claude</summary>
+      <description>Fetch and show Claude Code usage</description>
+    </key>
+    <key name="show-codex" type="b">
+      <default>true</default>
+      <summary>Show Codex</summary>
+      <description>Fetch and show OpenAI Codex usage</description>
     </key>
     <key name="proxy-url" type="s">
       <default>''</default>

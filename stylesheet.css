@@ -31,28 +31,41 @@
 
 .cu-popup {
     width: 280px;
+    spacing: 4px;
+}
+
+.cu-provider {
     spacing: 0;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.cu-provider:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom-width: 0;
 }
 
 .cu-header {
     spacing: 8px;
-    padding-bottom: 8px;
-    margin-bottom: 4px;
+    padding-bottom: 2px;
+    margin-bottom: 2px;
 }
 
 .cu-title {
     font-weight: bold;
-    font-size: 11pt;
+    font-size: 10.5pt;
 }
 
 .cu-tier {
-    font-size: 9pt;
+    font-size: 8.5pt;
     color: rgba(128, 128, 128, 1.0);
 }
 
 .cu-meter {
-    spacing: 4px;
-    margin-bottom: 10px;
+    spacing: 2px;
+    margin-bottom: 6px;
 }
 
 .cu-meter-row {
@@ -60,12 +73,12 @@
 }
 
 .cu-meter-name {
-    font-size: 10pt;
+    font-size: 9.5pt;
 }
 
 .cu-meter-pct {
     font-feature-settings: "tnum";
-    font-size: 10pt;
+    font-size: 9.5pt;
 }
 
 .cu-track {

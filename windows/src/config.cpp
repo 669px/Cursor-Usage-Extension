@@ -37,6 +37,8 @@ void Config::Load() {
     try {
       if (key == "refresh_interval")
         refreshIntervalSec = (std::max)(10, std::stoi(val));
+      else if (key == "panel_provider")
+        panelProvider = val;
       else if (key == "panel_window")
         panelWindow = val;
       else if (key == "usage_display")
@@ -45,6 +47,12 @@ void Config::Load() {
         showBilling = (val == "1" || val == "true");
       else if (key == "show_tier")
         showTier = (val != "0" && val != "false");
+      else if (key == "show_cursor")
+        showCursor = (val != "0" && val != "false");
+      else if (key == "show_claude")
+        showClaude = (val != "0" && val != "false");
+      else if (key == "show_codex")
+        showCodex = (val != "0" && val != "false");
       else if (key == "always_on_top")
         alwaysOnTop = (val != "0" && val != "false");
       else if (key == "start_compact")
@@ -54,15 +62,13 @@ void Config::Load() {
       else if (key == "opacity") {
         int o = std::stoi(val);
         opacity = o < 80 ? 80 : (o > 255 ? 255 : o);
-      }
-      else if (key == "window_x")
+      } else if (key == "window_x")
         windowX = std::stoi(val);
       else if (key == "window_y")
         windowY = std::stoi(val);
       else if (key == "proxy_url")
         proxyUrl = Utf8ToWide(val);
     } catch (...) {
-      // ignore bad lines
     }
   }
 }
@@ -72,10 +78,14 @@ void Config::Save() const {
   if (!out)
     return;
   out << "refresh_interval=" << refreshIntervalSec << "\n"
+      << "panel_provider=" << panelProvider << "\n"
       << "panel_window=" << panelWindow << "\n"
       << "usage_display=" << usageDisplay << "\n"
       << "show_billing=" << (showBilling ? "1" : "0") << "\n"
       << "show_tier=" << (showTier ? "1" : "0") << "\n"
+      << "show_cursor=" << (showCursor ? "1" : "0") << "\n"
+      << "show_claude=" << (showClaude ? "1" : "0") << "\n"
+      << "show_codex=" << (showCodex ? "1" : "0") << "\n"
       << "always_on_top=" << (alwaysOnTop ? "1" : "0") << "\n"
       << "start_compact=" << (startCompact ? "1" : "0") << "\n"
       << "start_hidden=" << (startHidden ? "1" : "0") << "\n"
