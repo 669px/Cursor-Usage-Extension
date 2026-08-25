@@ -1,9 +1,9 @@
 {
-  "name": "Cursor Usage",
-  "description": "Show Cursor AI usage in the GNOME top panel.\n\nReads a local Cursor session token from disk (CLI auth.json, or an optional CURSOR_SESSION_TOKEN override) and fetches live usage from cursor.com. Does not spawn the Cursor CLI.\n\nNot affiliated with, funded by, or associated with Cursor or Anysphere.",
+  "name": "AI Usage",
+  "description": "Show Cursor, Claude, and Codex usage in the GNOME top panel.\n\nReads local session tokens from disk (Cursor auth.json, Claude credentials, Codex auth.json) and fetches live usage. Does not spawn CLIs.\n\nNot affiliated with Cursor, Anthropic, or OpenAI.",
   "uuid": "cursor-usage@669px.github.io",
   "shell-version": ["46", "47", "48", "49", "50"],
-  "url": "https://github.com/669px/Cursor-Usage-Extension",
+  "url": "https://github.com/669px/AI-Usage-Extension",
   "settings-schema": "org.gnome.shell.extensions.cursor-usage",
   "donations": {
     "github": "669px"
