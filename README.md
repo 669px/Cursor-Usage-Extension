@@ -96,6 +96,12 @@ Open from the extension menu (**Prefs**) or GNOME Extensions:
 - Show/hide icon, plan tier, and billing line
 - Optional HTTP proxy URL
 
+## Windows widget
+
+A native Win32 desktop widget lives in [`windows/`](windows/). Same usage API and auth idea, as a floating card with a tray icon.
+
+See [windows/README.md](windows/README.md) for build steps (CMake + MSVC or MinGW).
+
 ## Package for extensions.gnome.org
 
 ```bash

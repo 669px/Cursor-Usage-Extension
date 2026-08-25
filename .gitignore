@@ -3,3 +3,11 @@
 .direnv
 .envrc
 *.shell-extension.zip
+windows/build/
+windows/build-mingw/
+windows/dist/
+**/CMakeCache.txt
+**/CMakeFiles/
+*.user
+*.suo
+*.VC.db
