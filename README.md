@@ -102,15 +102,6 @@ A native Win32 desktop widget lives in [`windows/`](windows/). Same usage API an
 
 See [windows/README.md](windows/README.md) for build steps (CMake + MSVC or MinGW).
 
-## Package for extensions.gnome.org
-
-```bash
-./pack
-```
-
-Upload `cursor-usage@669px.github.io.shell-extension.zip` at  
-https://extensions.gnome.org/upload/
-
 ## Disclaimer
 
 Not affiliated with, funded by, or associated with Cursor or Anysphere.
