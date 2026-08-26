@@ -399,11 +399,24 @@ static std::optional<std::chrono::system_clock::time_point> ParseIso(const std::
       tzPos = dash;
   }
   if (tzPos != std::string::npos && iso[tzPos] != 'Z' && iso[tzPos] != 'z') {
-    int oh = 0, om = 0;
-    if (std::sscanf(iso.c_str() + tzPos + 1, "%d:%d", &oh, &om) >= 1) {
-      int offset = oh * 3600 + om * 60;
-      t -= (iso[tzPos] == '-') ? -offset : offset;
+    // Accept both the extended ("+05:30") and basic ("+0530") forms. Scanning
+    // "%d" over the basic form would read 0530 as a 530-hour offset.
+    std::string digits;
+    for (size_t i = tzPos + 1; i < iso.size() && digits.size() < 4; ++i) {
+      if (std::isdigit(static_cast<unsigned char>(iso[i])))
+        digits.push_back(iso[i]);
+      else if (iso[i] != ':')
+        break;
     }
+    int oh = 0, om = 0;
+    if (digits.size() >= 4) {
+      oh = (digits[0] - '0') * 10 + (digits[1] - '0');
+      om = (digits[2] - '0') * 10 + (digits[3] - '0');
+    } else if (digits.size() >= 2) {
+      oh = (digits[0] - '0') * 10 + (digits[1] - '0');
+    }
+    const int offset = oh * 3600 + om * 60;
+    t -= (iso[tzPos] == '-') ? -offset : offset;
   }
   return std::chrono::system_clock::from_time_t(t);
 }

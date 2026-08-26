@@ -181,6 +181,21 @@ std::optional<CredStore> ReadVault(const std::wstring& target) {
 }
 
 bool WriteVault(const std::wstring& target, const std::string& raw) {
+  // CredWriteW replaces the whole record, so build the new one from the record
+  // that is already there and swap only the blob. Writing a zero-initialised
+  // CREDENTIALW would strip the CLI's own UserName, Comment, Attributes and
+  // persistence scope. The shallow copy is safe because every borrowed pointer
+  // stays alive until CredFree below.
+  PCREDENTIALW existing = nullptr;
+  if (CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &existing) && existing) {
+    CREDENTIALW updated = *existing;
+    updated.CredentialBlobSize = static_cast<DWORD>(raw.size());
+    updated.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char*>(raw.data()));
+    const BOOL ok = CredWriteW(&updated, 0);
+    CredFree(existing);
+    return ok == TRUE;
+  }
+
   CREDENTIALW cred{};
   cred.Type = CRED_TYPE_GENERIC;
   cred.TargetName = const_cast<wchar_t*>(target.c_str());
@@ -357,10 +372,18 @@ std::optional<ClaudeCred> ResolveClaudeCred(const std::wstring& proxyUrl, std::s
   }
 
   // Serialise refreshes so two widget instances cannot both spend the same
-  // single-use refresh token and knock each other out.
+  // single-use refresh token and knock each other out. If we cannot take the
+  // lock we must not refresh at all, or we would race the holder for it.
   HANDLE lock = CreateMutexW(nullptr, FALSE, L"Local\\AIUsageWidget.ClaudeRefresh");
-  if (lock)
-    WaitForSingleObject(lock, 10000);
+  bool owned = false;
+  if (lock) {
+    const DWORD wait = WaitForSingleObject(lock, 10000);
+    owned = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
+    if (!owned) {
+      CloseHandle(lock);
+      lock = nullptr;
+    }
+  }
   struct LockGuard {
     HANDLE h;
     ~LockGuard() {
@@ -402,9 +425,11 @@ std::optional<ClaudeCred> ResolveClaudeCred(const std::wstring& proxyUrl, std::s
       expiredCandidate = ClaudeCred{token, JsonString(section, "subscriptionType"), false};
   }
 
-  if (refreshable) {
+  if (refreshable && owned) {
     if (auto renewed = RefreshStore(*refreshable, proxyUrl, reason))
       return renewed;
+  } else if (refreshable && reason) {
+    *reason = "Refreshing";
   }
 
   // Refresh was impossible or failed. The stale token is still worth a try —

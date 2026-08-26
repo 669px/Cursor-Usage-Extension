@@ -29,7 +29,7 @@
 
 .cu-panel-tier {
     font-size: 8.5pt;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(128, 128, 128, 1.0);
 }
 
 /* Popup ---------------------------------------------------------------- */
@@ -44,7 +44,7 @@
     spacing: 0;
     margin-bottom: 10px;
     padding-bottom: 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(128, 128, 128, 0.18);
 }
 
 .cu-provider:last-child {
@@ -64,7 +64,7 @@
     width: 7px;
     height: 7px;
     border-radius: 4px;
-    background-color: rgba(255, 255, 255, 0.4);
+    background-color: rgba(128, 128, 128, 0.6);
 }
 
 .cu-dot-cursor {
@@ -88,8 +88,8 @@
 .cu-tier {
     font-size: 8pt;
     font-weight: bold;
-    color: rgba(255, 255, 255, 0.7);
-    background-color: rgba(255, 255, 255, 0.1);
+    color: rgba(128, 128, 128, 1.0);
+    background-color: rgba(128, 128, 128, 0.18);
     border-radius: 5px;
     padding: 1px 6px;
 }
@@ -109,7 +109,6 @@
 
 .cu-meter-name {
     font-size: 9.5pt;
-    color: rgba(255, 255, 255, 0.75);
 }
 
 .cu-meter-pct {
@@ -122,7 +121,7 @@
     width: 280px;
     height: 6px;
     border-radius: 3px;
-    background-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(128, 128, 128, 0.3);
 }
 
 .cu-fill {
@@ -145,12 +144,12 @@
 
 .cu-caption {
     font-size: 8.5pt;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(128, 128, 128, 1.0);
 }
 
 .cu-billing {
     font-size: 8.5pt;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(128, 128, 128, 1.0);
     margin: 2px 0 4px 0;
 }
 
@@ -166,29 +165,27 @@
     spacing: 4px;
     margin-top: 4px;
     padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(128, 128, 128, 0.22);
 }
 
 .cu-updated {
     font-size: 8.5pt;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(128, 128, 128, 1.0);
 }
 
 /* Real pill buttons instead of bare text links. */
 .cu-link {
     font-size: 8.5pt;
-    color: rgba(255, 255, 255, 0.75);
-    background-color: rgba(255, 255, 255, 0.08);
+    background-color: rgba(128, 128, 128, 0.18);
     border-radius: 6px;
     padding: 3px 10px;
 }
 
 .cu-link:hover,
 .cu-link:focus {
-    color: #ffffff;
-    background-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(128, 128, 128, 0.32);
 }
 
 .cu-link:active {
-    background-color: rgba(255, 255, 255, 0.22);
+    background-color: rgba(128, 128, 128, 0.42);
 }

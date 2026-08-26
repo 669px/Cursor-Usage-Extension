@@ -245,17 +245,21 @@ AllUsage FetchAllUsage(const Config& config) {
 }
 
 const Pool* SelectPool(const ProviderUsage& data, const std::string& panelWindow) {
+  // Resolve to null rather than to a pool flagged missing: callers read
+  // utilization directly, so handing one back reports a confident 0%.
+  const Pool* a = data.a.missing ? nullptr : &data.a;
+  const Pool* b = data.b.missing ? nullptr : &data.b;
   if (panelWindow == "api")
-    return data.b.missing ? &data.a : &data.b;
+    return b ? b : a;
+  if (panelWindow == "auto")
+    return a ? a : b;
   if (panelWindow == "total")
     return data.total.missing ? nullptr : &data.total;
-  if (panelWindow == "auto")
-    return data.a.missing ? &data.b : &data.a;
-  if (data.a.missing)
-    return data.b.missing ? nullptr : &data.b;
-  if (data.b.missing)
-    return &data.a;
-  return data.a.utilization >= data.b.utilization ? &data.a : &data.b;
+  if (!a)
+    return b;
+  if (!b)
+    return a;
+  return a->utilization >= b->utilization ? a : b;
 }
 
 const ProviderUsage* SelectProvider(const AllUsage& all, const Config& config) {

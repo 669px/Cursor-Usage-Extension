@@ -715,13 +715,16 @@ class CursorUsageIndicator extends PanelMenu.Button {
                 // A stored token that has aged out used to leave the menu stuck
                 // on "HTTP 401" until the user next ran the CLI by hand.
                 if (expired && oauth.refreshToken) {
-                    this._renewClaudeToken(auth, cancellable, (fresh, err) => {
-                        if (fresh)
-                            this._fetchClaude(fresh, tier, cancellable);
-                        else if (!cancellable.is_cancelled()) {
-                            this._setProviderUnavailable('claude', err ?? 'Session expired');
-                            this._doneOne();
-                        }
+                    this._renewClaudeToken(auth, cancellable, fresh => {
+                        if (cancellable.is_cancelled())
+                            return;
+                        // If the renewal could not happen -- clock skew, or the
+                        // token endpoint briefly unreachable -- the stored token
+                        // may well still be accepted, so try it rather than
+                        // declaring the session dead.
+                        // No retry flag: a renewal has just been attempted, so
+                        // a rejection here is a genuinely dead session.
+                        this._fetchClaude(fresh ?? token, tier, cancellable, false);
                     });
                     return;
                 }
@@ -1000,6 +1003,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
             total: {
                 utilization: Math.max(a.utilization, b?.utilization ?? 0),
                 resets_at: b?.resets_at ?? a.resets_at,
+                missing: !!a.missing && (b?.missing ?? true),
             },
             billing,
         };
@@ -1120,7 +1124,9 @@ class CursorUsageIndicator extends PanelMenu.Button {
             enabled.push(this._last.codex);
         if (!enabled.length)
             return null;
-        if (mode !== 'max' && this._last[mode])
+        // Only honour the chosen provider while it is both enabled and up;
+        // otherwise fall through to the most-used of whatever is left.
+        if (mode !== 'max' && enabled.includes(this._last[mode]))
             return this._last[mode];
         // max across providers, and the fallback when the chosen one is down
         let best = null;
