@@ -27,12 +27,22 @@ void Config::Load() {
     auto eq = line.find('=');
     if (eq == std::string::npos)
       continue;
+    // Trim both ends of both halves. Without stripping the trailing CR, a file
+    // that has been through Notepad turns every "=1" into "1\r" and silently
+    // disables every boolean setting.
+    auto trim = [](std::string& v) {
+      const char* ws = " \t\r\n";
+      size_t first = v.find_first_not_of(ws);
+      if (first == std::string::npos) {
+        v.clear();
+        return;
+      }
+      v = v.substr(first, v.find_last_not_of(ws) - first + 1);
+    };
     std::string key = line.substr(0, eq);
     std::string val = line.substr(eq + 1);
-    while (!key.empty() && (key.back() == ' ' || key.back() == '\t'))
-      key.pop_back();
-    while (!val.empty() && (val.front() == ' ' || val.front() == '\t'))
-      val.erase(val.begin());
+    trim(key);
+    trim(val);
 
     try {
       if (key == "refresh_interval")

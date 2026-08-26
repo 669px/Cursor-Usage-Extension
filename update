@@ -16,7 +16,8 @@ rm -rf "$HOME/.local/share/gnome-shell/extensions/cursor-usage@669px"
 rm -rf "$target_dir"
 mkdir -p "$(dirname "$target_dir")"
 cp -a "$repo_dir"/. "$target_dir"
-rm -rf "$target_dir/.git" "$target_dir/.github"
+# The Windows widget and its build tree are not part of the shell extension.
+rm -rf "$target_dir/.git" "$target_dir/.github" "$target_dir/windows"
 rm -f "$target_dir"/*.shell-extension.zip "$target_dir"/*.zip
 rm -f "$target_dir/schemas/gschemas.compiled"
 glib-compile-schemas "$target_dir/schemas"

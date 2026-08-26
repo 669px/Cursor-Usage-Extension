@@ -14,13 +14,19 @@ Minimal top-panel extension for GNOME Shell 46–50.
 - Plan tiers, reset countdown, optional billing/credits
 - Prefs for providers, panel target, refresh, proxy
 
-### Auth (local files only — no CLI spawn)
+### Auth (reuses what the CLIs already stored — no separate login)
 
 | Provider | Source |
 | --- | --- |
 | Cursor | `~/.config/cursor/auth.json`, `CURSOR_SESSION_TOKEN`, or desktop `state.vscdb` |
 | Claude | `~/.claude/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN` |
 | Codex | `~/.codex/auth.json` |
+
+Claude OAuth tokens expire. When the stored one has aged out, the extension
+renews it with the saved refresh token and writes the rotated pair back to
+`.credentials.json`, so the CLI keeps working and you never have to sign in
+again just for the meter. If the file cannot be written, the renewal is
+abandoned rather than risk invalidating the CLI's login.
 
 ### Install
 
@@ -35,7 +41,8 @@ Reload Shell (Wayland logout, or X11 `Alt+F2` → `r`).
 
 ## Windows widget
 
-Floating Win32 card + tray icon. Same providers and auth idea.
+Floating Win32 card + tray icon. Same providers and auth idea, including the
+silent Claude token renewal.
 
 Binary: `CursorUsage.exe` on the release page, or build under [`windows/`](windows/).
 

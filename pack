@@ -10,7 +10,8 @@ rm -f ./*.shell-extension.zip ./*.zip
 
 gnome-extensions pack -f \
 	--extra-source=icon.png \
-	--extra-source=icon-22.png
+	--extra-source=icon-22.png \
+	--extra-source=icons
 
 zip_name="$(ls -1 ./*.shell-extension.zip | head -n1)"
 echo "Created: $repo_dir/$zip_name"

@@ -16,9 +16,14 @@ const CURSOR_API_URL = 'https://cursor.com/api/usage-summary';
 const CURSOR_PAGE_URL = 'https://cursor.com/dashboard/usage';
 const CLAUDE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PAGE_URL = 'https://claude.ai/settings/usage';
+const CLAUDE_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+// Public client id the Claude Code CLI uses for its own OAuth flow.
+const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+// Renew slightly early so a refresh mid-request cannot 401 us.
+const CLAUDE_EXPIRY_SKEW_MS = 120 * 1000;
 const CODEX_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const CODEX_PAGE_URL = 'https://chatgpt.com/codex';
-const TRACK_WIDTH = 260;
+const TRACK_WIDTH = 280;
 const RING_SIZE = 16;
 const RING_WIDTH = 2.5;
 
@@ -69,6 +74,18 @@ function relativeReset(isoOrUnix) {
     if (diff <= 0)
         return 'resetting';
     return `resets in ${humanDuration(diff / 1000)}`;
+}
+
+function statusLabel(status) {
+    if (status === 401 || status === 403)
+        return 'Session expired';
+    if (status === 404)
+        return 'Not available';
+    if (status === 429)
+        return 'Rate limited';
+    if (status >= 500)
+        return 'Service down';
+    return `HTTP ${status}`;
 }
 
 function planLabel(value, fallback = 'AI') {
@@ -124,20 +141,18 @@ function pct(value) {
 }
 
 function pickPool(a, b, mode) {
+    const known = p => (p && !p.missing ? p : null);
+    const ka = known(a);
+    const kb = known(b);
     if (mode === 'auto')
-        return a;
+        return ka ?? kb;
     if (mode === 'api')
-        return b ?? a;
-    if (mode === 'total')
-        return b?.utilization != null && a?.utilization != null
-            ? ((a.utilization >= (b.utilization ?? 0)) ? a : b)
-            : (a ?? b);
-    // max
-    if (!a)
-        return b;
-    if (!b)
-        return a;
-    return (a.utilization ?? 0) >= (b.utilization ?? 0) ? a : b;
+        return kb ?? ka;
+    if (!ka)
+        return kb;
+    if (!kb)
+        return ka;
+    return (ka.utilization ?? 0) >= (kb.utilization ?? 0) ? ka : kb;
 }
 
 class Meter {
@@ -151,16 +166,26 @@ class Meter {
         this._track = new St.BoxLayout({style_class: 'cu-track'});
         this._fill = new St.Widget({style_class: 'cu-fill usage-low'});
         this._track.add_child(this._fill);
+        this._ratio = 0;
+        // The fill used to be sized from a hardcoded 260px constant, so it
+        // drifted out of the track under any text-scaling factor.
+        this._trackNotifyId = this._track.connect('notify::width', () => this._applyFill());
         this._caption = new St.Label({text: '', style_class: 'cu-caption'});
         this.root.add_child(row);
         this.root.add_child(this._track);
         this.root.add_child(this._caption);
     }
 
+    _applyFill() {
+        const width = this._track.get_width() || TRACK_WIDTH;
+        this._fill.set_width(Math.round(this._ratio * width));
+    }
+
     setValue(util, caption, displayValue = util, suffix = 'used') {
         const clamped = Math.max(0, Math.min(100, util));
         this._pct.text = `${displayValue.toFixed(0)}% ${suffix}`;
-        this._fill.set_width(Math.round((clamped / 100) * TRACK_WIDTH));
+        this._ratio = clamped / 100;
+        this._applyFill();
         this._fill.style_class = `cu-fill ${severity(util)}`;
         this._caption.text = caption ?? '';
         this._caption.visible = !!caption;
@@ -168,7 +193,8 @@ class Meter {
 
     setMuted(detail = '-') {
         this._pct.text = detail;
-        this._fill.set_width(0);
+        this._ratio = 0;
+        this._applyFill();
         this._fill.style_class = 'cu-fill';
         this._caption.visible = false;
     }
@@ -178,17 +204,26 @@ class Meter {
     }
 
     destroy() {
+        if (this._trackNotifyId) {
+            this._track.disconnect(this._trackNotifyId);
+            this._trackNotifyId = null;
+        }
         this.root?.destroy();
         this.root = null;
     }
 }
 
 class ProviderBlock {
-    constructor(title) {
+    constructor(title, id) {
         this.root = new St.BoxLayout({vertical: true, style_class: 'cu-provider'});
         const header = new St.BoxLayout({style_class: 'cu-header'});
+        this._dot = new St.Widget({
+            style_class: `cu-dot cu-dot-${id}`,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
         this._title = new St.Label({text: title, style_class: 'cu-title', x_expand: true});
         this._tier = new St.Label({text: '', style_class: 'cu-tier'});
+        header.add_child(this._dot);
         header.add_child(this._title);
         header.add_child(this._tier);
         this.root.add_child(header);
@@ -283,11 +318,15 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._cancellable = null;
         this._tokenProc = null;
         this._pending = 0;
+        this._claudeRenewing = false;
 
         const box = new St.BoxLayout({style_class: 'cu-panel'});
+        // A symbolic SVG recolours with the panel theme; the old PNG stayed a
+        // fixed colour and looked foreign next to the other status icons.
         this._icon = new St.Icon({
-            gicon: Gio.icon_new_for_string(GLib.build_filenamev([this._extensionPath, 'icon-22.png'])),
-            style_class: 'cu-panel-icon',
+            gicon: Gio.icon_new_for_string(
+                GLib.build_filenamev([this._extensionPath, 'icons', 'ai-usage-symbolic.svg'])),
+            style_class: 'cu-panel-icon system-status-icon',
             icon_size: 14,
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -351,6 +390,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
             }
             this._tokenProc = null;
         }
+        this._claudeRenewing = false;
     }
 
     _newCancellable() {
@@ -394,11 +434,11 @@ class CursorUsageIndicator extends PanelMenu.Button {
         item.add_child(root);
         this.menu.addMenuItem(item);
 
-        this._cursorBlock = new ProviderBlock('Cursor');
+        this._cursorBlock = new ProviderBlock('Cursor', 'cursor');
         this._cursorBlock.setMeterNames('Auto', 'API');
-        this._claudeBlock = new ProviderBlock('Claude');
+        this._claudeBlock = new ProviderBlock('Claude', 'claude');
         this._claudeBlock.setMeterNames('5h', '7d');
-        this._codexBlock = new ProviderBlock('Codex');
+        this._codexBlock = new ProviderBlock('Codex', 'codex');
         this._codexBlock.setMeterNames('Primary', 'Weekly');
         root.add_child(this._cursorBlock.root);
         root.add_child(this._claudeBlock.root);
@@ -468,6 +508,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
     _refreshUsage() {
         const cancellable = this._newCancellable();
         this._pending = 0;
+        this._markRefreshing();
         if (this._settings.get_boolean('show-cursor')) {
             this._pending++;
             this._refreshCursor(cancellable);
@@ -652,7 +693,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
         }
         const file = Gio.File.new_for_path(this._claudeCredPath());
         if (!file.query_exists(null)) {
-            this._setProviderUnavailable('claude', 'Login required');
+            this._setProviderUnavailable('claude', 'Run claude to sign in');
             this._doneOne();
             return;
         }
@@ -660,14 +701,31 @@ class CursorUsageIndicator extends PanelMenu.Button {
             try {
                 const [, contents] = file.load_contents_finish(result);
                 const auth = JSON.parse(new TextDecoder('utf-8').decode(contents));
-                const oauth = auth.claudeAiOauth ?? null;
+                const oauth = auth.claudeAiOauth ?? auth ?? null;
                 const token = oauth?.accessToken ?? null;
                 if (!token) {
                     this._setProviderUnavailable('claude', 'No OAuth');
                     this._doneOne();
                     return;
                 }
-                this._fetchClaude(token, planLabel(oauth.subscriptionType, 'CLAUDE'), cancellable);
+                const tier = planLabel(oauth.subscriptionType, 'CLAUDE');
+                const expired = typeof oauth.expiresAt === 'number' &&
+                    oauth.expiresAt > 0 &&
+                    oauth.expiresAt - CLAUDE_EXPIRY_SKEW_MS <= Date.now();
+                // A stored token that has aged out used to leave the menu stuck
+                // on "HTTP 401" until the user next ran the CLI by hand.
+                if (expired && oauth.refreshToken) {
+                    this._renewClaudeToken(auth, cancellable, (fresh, err) => {
+                        if (fresh)
+                            this._fetchClaude(fresh, tier, cancellable);
+                        else if (!cancellable.is_cancelled()) {
+                            this._setProviderUnavailable('claude', err ?? 'Session expired');
+                            this._doneOne();
+                        }
+                    });
+                    return;
+                }
+                this._fetchClaude(token, tier, cancellable, !expired);
             } catch (_e) {
                 if (cancellable.is_cancelled())
                     return;
@@ -677,14 +735,110 @@ class CursorUsageIndicator extends PanelMenu.Button {
         });
     }
 
-    _fetchClaude(token, tier, cancellable) {
+    // Exchanges the stored refresh token for a new access token and saves the
+    // rotated pair back. The server invalidates the old refresh token as soon
+    // as it answers, so if the write fails we deliberately discard the new
+    // token rather than silently log the CLI out on its next start.
+    _renewClaudeToken(auth, cancellable, cb) {
+        if (this._claudeRenewing) {
+            cb(null, 'Refreshing');
+            return;
+        }
+        const oauth = auth.claudeAiOauth ?? auth;
+        this._claudeRenewing = true;
+        const done = (token, err) => {
+            this._claudeRenewing = false;
+            cb(token, err);
+        };
+
+        const message = Soup.Message.new('POST', CLAUDE_TOKEN_URL);
+        const payload = JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: oauth.refreshToken,
+            client_id: CLAUDE_CLIENT_ID,
+        });
+        message.set_request_body_from_bytes(
+            'application/json',
+            new GLib.Bytes(new TextEncoder().encode(payload))
+        );
+        message.request_headers.append('Accept', 'application/json');
+        message.request_headers.append('User-Agent', 'claude-code/2.1.72');
+
+        this._session.send_and_read_async(
+            message,
+            GLib.PRIORITY_DEFAULT,
+            cancellable,
+            (session, result) => {
+                try {
+                    const bytes = session.send_and_read_finish(result);
+                    if (message.status_code !== 200) {
+                        done(null, message.status_code === 400 || message.status_code === 401
+                            ? 'Session expired'
+                            : `HTTP ${message.status_code}`);
+                        return;
+                    }
+                    const data = JSON.parse(
+                        new TextDecoder('utf-8').decode(bytes.get_data()));
+                    if (!data.access_token) {
+                        done(null, 'Refresh rejected');
+                        return;
+                    }
+                    const next = {...oauth, accessToken: data.access_token};
+                    if (data.refresh_token)
+                        next.refreshToken = data.refresh_token;
+                    next.expiresAt = Date.now() +
+                        (Number(data.expires_in) || 8 * 3600) * 1000;
+
+                    const updated = auth.claudeAiOauth
+                        ? {...auth, claudeAiOauth: next}
+                        : next;
+                    if (!this._writeClaudeCreds(updated)) {
+                        done(null, 'Cannot save token');
+                        return;
+                    }
+                    done(data.access_token, null);
+                } catch (_e) {
+                    if (cancellable.is_cancelled())
+                        return;
+                    done(null, 'Refresh failed');
+                }
+            }
+        );
+    }
+
+    _writeClaudeCreds(auth) {
+        try {
+            const path = this._claudeCredPath();
+            const file = Gio.File.new_for_path(path);
+            const bytes = new TextEncoder().encode(`${JSON.stringify(auth, null, 2)}\n`);
+            const [ok] = file.replace_contents(
+                bytes, null, false, Gio.FileCreateFlags.PRIVATE, null);
+            if (!ok)
+                return false;
+            // Keep the file owner-only, the way the CLI writes it.
+            file.set_attribute_uint32(
+                'unix::mode', 0o600, Gio.FileQueryInfoFlags.NONE, null);
+            return true;
+        } catch (_e) {
+            return false;
+        }
+    }
+
+    _fetchClaude(token, tier, cancellable, mayRetry = false) {
         this._httpGet(CLAUDE_API_URL, {
             Authorization: `Bearer ${token}`,
             'anthropic-beta': 'oauth-2025-04-20',
             'User-Agent': 'claude-code/2.1.72',
             'Content-Type': 'application/json',
-        }, cancellable, (ok, data, err) => {
+        }, cancellable, (ok, data, err, status) => {
             if (!ok) {
+                // The token can be refused before its recorded expiry when it
+                // has been revoked or the clock is skewed; one forced renewal
+                // turns that into a working request.
+                if (mayRetry && (status === 401 || status === 403)) {
+                    this._retryClaudeAfterRefresh(tier, cancellable, err);
+                    return;
+                }
                 this._setProviderUnavailable('claude', err);
                 this._doneOne();
                 return;
@@ -693,6 +847,33 @@ class CursorUsageIndicator extends PanelMenu.Button {
             this._renderProvider('claude');
             this._renderPanel();
             this._scheduleCountdown();
+            this._doneOne();
+        });
+    }
+
+    _retryClaudeAfterRefresh(tier, cancellable, previousError) {
+        let auth = null;
+        try {
+            const [ok, contents] = GLib.file_get_contents(this._claudeCredPath());
+            if (ok)
+                auth = JSON.parse(new TextDecoder('utf-8').decode(contents));
+        } catch (_e) {
+            auth = null;
+        }
+        const oauth = auth?.claudeAiOauth ?? auth;
+        if (!oauth?.refreshToken) {
+            this._setProviderUnavailable('claude', previousError);
+            this._doneOne();
+            return;
+        }
+        this._renewClaudeToken(auth, cancellable, (fresh, err) => {
+            if (fresh) {
+                this._fetchClaude(fresh, tier, cancellable);
+                return;
+            }
+            if (cancellable.is_cancelled())
+                return;
+            this._setProviderUnavailable('claude', err ?? previousError);
             this._doneOne();
         });
     }
@@ -715,15 +896,18 @@ class CursorUsageIndicator extends PanelMenu.Button {
                 name: '5h',
                 utilization: pct(five?.utilization),
                 resets_at: five?.resets_at ?? null,
+                missing: five?.utilization == null,
             },
             b: {
                 name: '7d',
                 utilization: pct(seven?.utilization),
                 resets_at: seven?.resets_at ?? null,
+                missing: seven?.utilization == null,
             },
             total: {
                 utilization: Math.max(pct(five?.utilization), pct(seven?.utilization)),
                 resets_at: seven?.resets_at ?? five?.resets_at ?? null,
+                missing: five?.utilization == null && seven?.utilization == null,
             },
             billing,
         };
@@ -797,7 +981,8 @@ class CursorUsageIndicator extends PanelMenu.Button {
                 resets_at: typeof win.reset_at === 'number' ? win.reset_at : null,
             };
         };
-        const a = toPool(primary, 'Primary') ?? {name: 'Primary', utilization: 0, resets_at: null};
+        const a = toPool(primary, 'Primary') ??
+            {name: 'Primary', utilization: 0, resets_at: null, missing: true};
         const b = toPool(secondary, 'Weekly');
         let billing = '';
         if (this._settings.get_boolean('show-billing') && data.credits?.has_credits) {
@@ -834,15 +1019,16 @@ class CursorUsageIndicator extends PanelMenu.Button {
                 try {
                     const bytes = session.send_and_read_finish(result);
                     if (message.status_code !== 200) {
-                        cb(false, null, `HTTP ${message.status_code}`);
+                        cb(false, null, statusLabel(message.status_code),
+                            message.status_code);
                         return;
                     }
                     const data = JSON.parse(new TextDecoder('utf-8').decode(bytes.get_data()));
-                    cb(true, data, null);
+                    cb(true, data, null, 200);
                 } catch (_e) {
                     if (cancellable.is_cancelled())
                         return;
-                    cb(false, null, 'API failed');
+                    cb(false, null, 'API failed', 0);
                 }
             }
         );
@@ -860,6 +1046,7 @@ class CursorUsageIndicator extends PanelMenu.Button {
         this._last[id] = null;
         const block = this._blockFor(id);
         block._tier.text = '';
+        block._tier.visible = false;
         block.meterA.setVisible(true);
         block.meterB.setVisible(false);
         block.meterA.setMuted(detail);
@@ -895,7 +1082,8 @@ class CursorUsageIndicator extends PanelMenu.Button {
         }
         block._error.visible = false;
         block._error.text = '';
-        block._tier.text = data.tier;
+        block._tier.text = data.tier ?? '';
+        block._tier.visible = !!data.tier && this._settings.get_boolean('show-tier');
         if (data.isUnlimited) {
             block.meterA.setVisible(true);
             block.meterB.setVisible(true);
@@ -904,6 +1092,10 @@ class CursorUsageIndicator extends PanelMenu.Button {
         } else {
             this._applyMeter(block.meterA, data.a);
             this._applyMeter(block.meterB, data.b);
+            if (!block.meterA.root.visible && !block.meterB.root.visible) {
+                block.meterA.setVisible(true);
+                block.meterA.setMuted('no data');
+            }
         }
         block._billing.text = data.billing ?? '';
         block._billing.visible = !!(data.billing && this._settings.get_boolean('show-billing'));
@@ -928,13 +1120,9 @@ class CursorUsageIndicator extends PanelMenu.Button {
             enabled.push(this._last.codex);
         if (!enabled.length)
             return null;
-        if (mode === 'cursor')
-            return this._last.cursor;
-        if (mode === 'claude')
-            return this._last.claude;
-        if (mode === 'codex')
-            return this._last.codex;
-        // max across providers
+        if (mode !== 'max' && this._last[mode])
+            return this._last[mode];
+        // max across providers, and the fallback when the chosen one is down
         let best = null;
         let bestUtil = -1;
         for (const snap of enabled) {
@@ -955,7 +1143,9 @@ class CursorUsageIndicator extends PanelMenu.Button {
         if (snap.isUnlimited)
             return {utilization: 0, unlimited: true};
         if (mode === 'total')
-            return snap.total ?? pickPool(snap.a, snap.b, 'max');
+            return snap.total && !snap.total.missing
+                ? snap.total
+                : pickPool(snap.a, snap.b, 'max');
         return pickPool(snap.a, snap.b, mode);
     }
 
@@ -976,7 +1166,13 @@ class CursorUsageIndicator extends PanelMenu.Button {
             return;
         }
         const win = this._poolFromSnap(snap);
-        const util = pct(win?.utilization);
+        if (!win) {
+            this._label.text = '-';
+            this._label.style_class = 'cu-panel-pct';
+            this._ring.setUnknown();
+            return;
+        }
+        const util = pct(win.utilization);
         const display = this._settings.get_string('usage-display') === 'remaining'
             ? 100 - util
             : util;
@@ -991,7 +1187,8 @@ class CursorUsageIndicator extends PanelMenu.Button {
             this._countdownTimer = null;
         }
         const snap = this._selectedSnapshot();
-        const end = snap?.a?.resets_at ?? snap?.b?.resets_at;
+        const end = this._poolFromSnap(snap)?.resets_at ??
+            snap?.a?.resets_at ?? snap?.b?.resets_at;
         if (end == null)
             return;
         const target = typeof end === 'number' ? end * 1000 : Date.parse(end);
@@ -1015,6 +1212,10 @@ class CursorUsageIndicator extends PanelMenu.Button {
     _stamp(ok) {
         const now = GLib.DateTime.new_now_local();
         this._updated.text = `${ok ? 'Updated' : 'Checked'} ${now.format('%H:%M')}`;
+    }
+
+    _markRefreshing() {
+        this._updated.text = 'Refreshing…';
     }
 
     destroy() {

@@ -1,12 +1,11 @@
 #include "usage.hpp"
 #include "auth.hpp"
+#include "http.hpp"
 #include "util.hpp"
-
-#include <windows.h>
-#include <winhttp.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <future>
 #include <regex>
 #include <vector>
 
@@ -26,91 +25,10 @@ static double PctFromMessage(const std::string& msg) {
   return 0;
 }
 
-struct HttpResult {
-  std::optional<std::string> body;
-  DWORD status = 0;
-  std::string error;
-};
-
-static HttpResult HttpGet(const std::wstring& host, INTERNET_PORT port, const std::wstring& path,
-                          const std::vector<std::pair<std::wstring, std::wstring>>& headers,
-                          const std::wstring& proxyUrl) {
-  HttpResult out;
-  HINTERNET session = WinHttpOpen(L"ai-usage-widget/1.2",
-                                  proxyUrl.empty() ? WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
-                                                   : WINHTTP_ACCESS_TYPE_NAMED_PROXY,
-                                  proxyUrl.empty() ? WINHTTP_NO_PROXY_NAME : proxyUrl.c_str(),
-                                  WINHTTP_NO_PROXY_BYPASS, 0);
-  if (!session) {
-    out.error = "Network init failed";
-    return out;
-  }
-  WinHttpSetTimeouts(session, 5000, 5000, 15000, 15000);
-
-  HINTERNET connect = WinHttpConnect(session, host.c_str(), port, 0);
-  if (!connect) {
-    WinHttpCloseHandle(session);
-    out.error = "Connect failed";
-    return out;
-  }
-
-  DWORD flags = (port == INTERNET_DEFAULT_HTTPS_PORT) ? WINHTTP_FLAG_SECURE : 0;
-  HINTERNET request = WinHttpOpenRequest(connect, L"GET", path.c_str(), nullptr,
-                                         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-  if (!request) {
-    WinHttpCloseHandle(connect);
-    WinHttpCloseHandle(session);
-    out.error = "Request failed";
-    return out;
-  }
-
-  for (const auto& h : headers) {
-    std::wstring line = h.first + L": " + h.second + L"\r\n";
-    WinHttpAddRequestHeaders(request, line.c_str(), static_cast<DWORD>(-1L), WINHTTP_ADDREQ_FLAG_ADD);
-  }
-
-  if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0,
-                          0) ||
-      !WinHttpReceiveResponse(request, nullptr)) {
-    WinHttpCloseHandle(request);
-    WinHttpCloseHandle(connect);
-    WinHttpCloseHandle(session);
-    out.error = "API unreachable";
-    return out;
-  }
-
-  DWORD statusSize = sizeof(out.status);
-  WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                      WINHTTP_HEADER_NAME_BY_INDEX, &out.status, &statusSize, WINHTTP_NO_HEADER_INDEX);
-
-  std::string body;
-  DWORD avail = 0;
-  while (WinHttpQueryDataAvailable(request, &avail) && avail > 0) {
-    std::vector<char> buf(avail);
-    DWORD read = 0;
-    if (!WinHttpReadData(request, buf.data(), avail, &read) || read == 0)
-      break;
-    body.append(buf.data(), read);
-  }
-
-  WinHttpCloseHandle(request);
-  WinHttpCloseHandle(connect);
-  WinHttpCloseHandle(session);
-
-  if (out.status != 200) {
-    out.error = "HTTP " + std::to_string(out.status);
-    return out;
-  }
-  out.body = std::move(body);
-  return out;
-}
-
 static ProviderUsage NormalizeCursor(const std::string& json, bool showBilling) {
   ProviderUsage u;
   u.id = "cursor";
   u.tier = PlanLabel(JsonString(json, "membershipType"));
-  if (u.tier == "CURSOR" && JsonString(json, "membershipType").empty())
-    u.tier = "CURSOR";
   u.isUnlimited = JsonBool(json, "isUnlimited").value_or(false);
 
   auto individual = JsonObject(json, "individualUsage");
@@ -118,15 +36,14 @@ static ProviderUsage NormalizeCursor(const std::string& json, bool showBilling) 
   auto onDemand = JsonObject(individual, "onDemand");
   std::string end = JsonString(json, "billingCycleEnd");
 
-  double autoU = JsonNumber(plan, "autoPercentUsed")
-                     ? ClampPct(*JsonNumber(plan, "autoPercentUsed"))
-                     : PctFromMessage(JsonString(json, "autoModelSelectedDisplayMessage"));
-  double apiU = JsonNumber(plan, "apiPercentUsed")
-                    ? ClampPct(*JsonNumber(plan, "apiPercentUsed"))
-                    : PctFromMessage(JsonString(json, "namedModelSelectedDisplayMessage"));
-  double totalU = JsonNumber(plan, "totalPercentUsed")
-                      ? ClampPct(*JsonNumber(plan, "totalPercentUsed"))
-                      : (std::max)(autoU, apiU);
+  auto autoRaw = JsonNumber(plan, "autoPercentUsed");
+  auto apiRaw = JsonNumber(plan, "apiPercentUsed");
+  auto totalRaw = JsonNumber(plan, "totalPercentUsed");
+  double autoU = autoRaw ? ClampPct(*autoRaw)
+                         : PctFromMessage(JsonString(json, "autoModelSelectedDisplayMessage"));
+  double apiU = apiRaw ? ClampPct(*apiRaw)
+                       : PctFromMessage(JsonString(json, "namedModelSelectedDisplayMessage"));
+  double totalU = totalRaw ? ClampPct(*totalRaw) : (std::max)(autoU, apiU);
 
   u.a = {autoU, end, false};
   u.b = {apiU, end, false};
@@ -160,13 +77,17 @@ static ProviderUsage NormalizeClaude(const std::string& json, const std::string&
   ProviderUsage u;
   u.id = "claude";
   u.tier = PlanLabel(tier.empty() ? "claude" : tier);
-  auto five = JsonObject(json, "five_hour");
-  auto seven = JsonObject(json, "seven_day");
-  double a = ClampPct(JsonNumber(five, "utilization").value_or(0));
-  double b = ClampPct(JsonNumber(seven, "utilization").value_or(0));
-  u.a = {a, JsonString(five, "resets_at"), false};
-  u.b = {b, JsonString(seven, "resets_at"), false};
-  u.total = {(std::max)(a, b), u.b.resetsAt.empty() ? u.a.resetsAt : u.b.resetsAt, false};
+  auto window = [](const std::string& obj) -> Pool {
+    auto util = JsonNumber(obj, "utilization");
+    if (obj.empty() || !util)
+      return {0, {}, true};
+    return {ClampPct(*util), JsonString(obj, "resets_at"), false};
+  };
+  u.a = window(JsonObject(json, "five_hour"));
+  u.b = window(JsonObject(json, "seven_day"));
+  double a = u.a.missing ? 0 : u.a.utilization;
+  double b = u.b.missing ? 0 : u.b.utilization;
+  u.total = {(std::max)(a, b), u.b.missing ? u.a.resetsAt : u.b.resetsAt, u.a.missing && u.b.missing};
   if (showBilling) {
     auto extra = JsonObject(json, "extra_usage");
     if (JsonBool(extra, "is_enabled").value_or(false)) {
@@ -204,11 +125,9 @@ static ProviderUsage NormalizeCodex(const std::string& json, bool showBilling) {
   };
 
   u.a = fromWin(primary);
-  if (u.a.missing)
-    u.a = {0, {}, false};
   u.b = fromWin(secondary);
-  u.total = {(std::max)(u.a.utilization, u.b.missing ? 0.0 : u.b.utilization),
-             u.b.missing ? u.a.resetsAt : u.b.resetsAt, false};
+  u.total = {(std::max)(u.a.missing ? 0.0 : u.a.utilization, u.b.missing ? 0.0 : u.b.utilization),
+             u.b.missing ? u.a.resetsAt : u.b.resetsAt, u.a.missing && u.b.missing};
 
   auto credits = JsonObject(json, "credits");
   u.isUnlimited = JsonBool(credits, "unlimited").value_or(false);
@@ -238,36 +157,49 @@ static ProviderUsage FetchCursor(const Config& config) {
     u.error = "Bad token";
     return u;
   }
-  auto http = HttpGet(L"cursor.com", INTERNET_DEFAULT_HTTPS_PORT, L"/api/usage-summary",
-                      {{L"Cookie", L"WorkosCursorSessionToken=" + Utf8ToWide(*cookie)},
-                       {L"User-Agent", L"ai-usage-widget"}},
-                      config.proxyUrl);
-  if (!http.body) {
-    u.error = http.error.empty() ? "API failed" : http.error;
+  auto response = HttpGet(L"cursor.com", L"/api/usage-summary",
+                          {{L"Cookie", L"WorkosCursorSessionToken=" + Utf8ToWide(*cookie)},
+                           {L"User-Agent", L"ai-usage-widget"}},
+                          config.proxyUrl);
+  if (!response.ok()) {
+    u.error = response.error.empty() ? HttpStatusLabel(response.status) : response.error;
     return u;
   }
-  return NormalizeCursor(*http.body, config.showBilling);
+  return NormalizeCursor(response.body, config.showBilling);
 }
 
 static ProviderUsage FetchClaude(const Config& config) {
   ProviderUsage u;
   u.id = "claude";
-  auto cred = ResolveClaudeCred();
+  std::string reason;
+  auto cred = ResolveClaudeCred(config.proxyUrl, &reason);
   if (!cred) {
-    u.error = "Login required";
+    u.error = reason.empty() ? "Run claude to sign in" : reason;
     return u;
   }
-  auto http = HttpGet(L"api.anthropic.com", INTERNET_DEFAULT_HTTPS_PORT, L"/api/oauth/usage",
-                      {{L"Authorization", L"Bearer " + Utf8ToWide(cred->accessToken)},
-                       {L"anthropic-beta", L"oauth-2025-04-20"},
-                       {L"User-Agent", L"claude-code/2.1.72"},
-                       {L"Content-Type", L"application/json"}},
-                      config.proxyUrl);
-  if (!http.body) {
-    u.error = http.error.empty() ? "API failed" : http.error;
+  auto request = [&](const std::string& token) {
+    return HttpGet(L"api.anthropic.com", L"/api/oauth/usage",
+                   {{L"Authorization", L"Bearer " + Utf8ToWide(token)},
+                    {L"anthropic-beta", L"oauth-2025-04-20"},
+                    {L"User-Agent", L"claude-code/2.1.72"},
+                    {L"Content-Type", L"application/json"}},
+                   config.proxyUrl);
+  };
+
+  auto response = request(cred->accessToken);
+  // A stored token can be rejected before its recorded expiry (revoked, or the
+  // clock is off). One forced refresh turns that into a working request instead
+  // of a permanent "HTTP 401" until the user next runs the CLI by hand.
+  if (!response.ok() && !cred->refreshed && (response.status == 401 || response.status == 403)) {
+    std::string retryReason;
+    if (auto renewed = ResolveClaudeCred(config.proxyUrl, &retryReason, /*force=*/true))
+      response = request(renewed->accessToken);
+  }
+  if (!response.ok()) {
+    u.error = response.error.empty() ? HttpStatusLabel(response.status) : response.error;
     return u;
   }
-  return NormalizeClaude(*http.body, cred->subscriptionType, config.showBilling);
+  return NormalizeClaude(response.body, cred->subscriptionType, config.showBilling);
 }
 
 static ProviderUsage FetchCodex(const Config& config) {
@@ -278,7 +210,7 @@ static ProviderUsage FetchCodex(const Config& config) {
     u.error = "Login required";
     return u;
   }
-  std::vector<std::pair<std::wstring, std::wstring>> headers = {
+  Headers headers = {
       {L"Authorization", L"Bearer " + Utf8ToWide(cred->accessToken)},
       {L"Accept", L"application/json"},
       {L"User-Agent", L"ai-usage-widget"},
@@ -286,23 +218,29 @@ static ProviderUsage FetchCodex(const Config& config) {
   if (!cred->accountId.empty())
     headers.emplace_back(L"ChatGPT-Account-Id", Utf8ToWide(cred->accountId));
 
-  auto http = HttpGet(L"chatgpt.com", INTERNET_DEFAULT_HTTPS_PORT, L"/backend-api/wham/usage",
-                      headers, config.proxyUrl);
-  if (!http.body) {
-    u.error = http.error.empty() ? "API failed" : http.error;
+  auto response = HttpGet(L"chatgpt.com", L"/backend-api/wham/usage", headers, config.proxyUrl);
+  if (!response.ok()) {
+    u.error = response.error.empty() ? HttpStatusLabel(response.status) : response.error;
     return u;
   }
-  return NormalizeCodex(*http.body, config.showBilling);
+  return NormalizeCodex(response.body, config.showBilling);
 }
 
 AllUsage FetchAllUsage(const Config& config) {
   AllUsage all;
+  std::future<ProviderUsage> cursor, claude, codex;
   if (config.showCursor)
-    all.cursor = FetchCursor(config);
+    cursor = std::async(std::launch::async, FetchCursor, std::cref(config));
   if (config.showClaude)
-    all.claude = FetchClaude(config);
+    claude = std::async(std::launch::async, FetchClaude, std::cref(config));
   if (config.showCodex)
-    all.codex = FetchCodex(config);
+    codex = std::async(std::launch::async, FetchCodex, std::cref(config));
+  if (cursor.valid())
+    all.cursor = cursor.get();
+  if (claude.valid())
+    all.claude = claude.get();
+  if (codex.valid())
+    all.codex = codex.get();
   return all;
 }
 
@@ -310,10 +248,14 @@ const Pool* SelectPool(const ProviderUsage& data, const std::string& panelWindow
   if (panelWindow == "api")
     return data.b.missing ? &data.a : &data.b;
   if (panelWindow == "total")
-    return &data.total;
+    return data.total.missing ? nullptr : &data.total;
   if (panelWindow == "auto")
+    return data.a.missing ? &data.b : &data.a;
+  if (data.a.missing)
+    return data.b.missing ? nullptr : &data.b;
+  if (data.b.missing)
     return &data.a;
-  return data.a.utilization >= (data.b.missing ? -1.0 : data.b.utilization) ? &data.a : &data.b;
+  return data.a.utilization >= data.b.utilization ? &data.a : &data.b;
 }
 
 const ProviderUsage* SelectProvider(const AllUsage& all, const Config& config) {

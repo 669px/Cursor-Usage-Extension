@@ -1,5 +1,7 @@
+/* Panel ---------------------------------------------------------------- */
+
 .cu-panel {
-    spacing: 4px;
+    spacing: 5px;
     padding: 0 2px;
 }
 
@@ -14,6 +16,7 @@
 
 .cu-panel-pct {
     font-feature-settings: "tnum";
+    font-weight: 500;
 }
 
 .cu-panel-pct.usage-high {
@@ -26,31 +29,54 @@
 
 .cu-panel-tier {
     font-size: 8.5pt;
-    color: rgba(128, 128, 128, 1.0);
+    color: rgba(255, 255, 255, 0.45);
 }
 
+/* Popup ---------------------------------------------------------------- */
+
 .cu-popup {
-    width: 280px;
-    spacing: 4px;
+    width: 296px;
+    spacing: 2px;
+    padding: 2px 2px 0 2px;
 }
 
 .cu-provider {
     spacing: 0;
-    margin-bottom: 6px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .cu-provider:last-child {
     margin-bottom: 0;
-    padding-bottom: 0;
+    padding-bottom: 2px;
     border-bottom-width: 0;
 }
 
 .cu-header {
     spacing: 8px;
-    padding-bottom: 2px;
-    margin-bottom: 2px;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+
+/* Accent dot makes each block scannable at a glance. */
+.cu-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.4);
+}
+
+.cu-dot-cursor {
+    background-color: #7e8aff;
+}
+
+.cu-dot-claude {
+    background-color: #d97757;
+}
+
+.cu-dot-codex {
+    background-color: #57bf9e;
 }
 
 .cu-title {
@@ -58,14 +84,23 @@
     font-size: 10.5pt;
 }
 
+/* Plan tier reads as a badge rather than loose grey text. */
 .cu-tier {
-    font-size: 8.5pt;
-    color: rgba(128, 128, 128, 1.0);
+    font-size: 8pt;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.7);
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+    padding: 1px 6px;
 }
 
 .cu-meter {
-    spacing: 2px;
-    margin-bottom: 6px;
+    spacing: 3px;
+    margin-bottom: 8px;
+}
+
+.cu-meter:last-child {
+    margin-bottom: 2px;
 }
 
 .cu-meter-row {
@@ -74,47 +109,49 @@
 
 .cu-meter-name {
     font-size: 9.5pt;
+    color: rgba(255, 255, 255, 0.75);
 }
 
 .cu-meter-pct {
     font-feature-settings: "tnum";
     font-size: 9.5pt;
+    font-weight: 500;
 }
 
 .cu-track {
-    width: 260px;
-    height: 4px;
-    border-radius: 2px;
-    background-color: rgba(128, 128, 128, 0.25);
+    width: 280px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: rgba(255, 255, 255, 0.14);
 }
 
 .cu-fill {
-    height: 4px;
-    border-radius: 2px;
+    height: 6px;
+    border-radius: 3px;
     background-color: #33d17a;
 }
 
 .cu-fill.usage-low {
-    background-color: #33d17a;
+    background-color: #3dd68c;
 }
 
 .cu-fill.usage-high {
-    background-color: #ff7800;
+    background-color: #ffa848;
 }
 
 .cu-fill.usage-critical {
-    background-color: #e01b24;
+    background-color: #ff6368;
 }
 
 .cu-caption {
     font-size: 8.5pt;
-    color: rgba(128, 128, 128, 1.0);
+    color: rgba(255, 255, 255, 0.45);
 }
 
 .cu-billing {
     font-size: 8.5pt;
-    color: rgba(128, 128, 128, 1.0);
-    margin: 2px 0 6px 0;
+    color: rgba(255, 255, 255, 0.45);
+    margin: 2px 0 4px 0;
 }
 
 .cu-error {
@@ -123,24 +160,35 @@
     margin: 4px 0;
 }
 
+/* Footer --------------------------------------------------------------- */
+
 .cu-footer {
-    spacing: 10px;
-    margin-top: 6px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(128, 128, 128, 0.2);
+    spacing: 4px;
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .cu-updated {
     font-size: 8.5pt;
-    color: rgba(128, 128, 128, 1.0);
+    color: rgba(255, 255, 255, 0.45);
 }
 
+/* Real pill buttons instead of bare text links. */
 .cu-link {
     font-size: 8.5pt;
-    color: #62a0ea;
-    padding: 0 2px;
+    color: rgba(255, 255, 255, 0.75);
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 3px 10px;
 }
 
-.cu-link:hover {
-    color: #99c1f1;
+.cu-link:hover,
+.cu-link:focus {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
+.cu-link:active {
+    background-color: rgba(255, 255, 255, 0.22);
 }

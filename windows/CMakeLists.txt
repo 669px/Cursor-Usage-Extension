@@ -1,17 +1,34 @@
 cmake_minimum_required(VERSION 3.16)
 project(CursorUsageWidget LANGUAGES CXX)
 
+if(MINGW)
+  enable_language(RC)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(CursorUsage WIN32
+set(CURSOR_USAGE_SOURCES
   src/main.cpp
   src/util.cpp
   src/config.cpp
   src/auth.cpp
+  src/http.cpp
   src/usage.cpp
   src/widget.cpp
 )
+
+# MSVC embeds app.manifest through the linker; MinGW needs it compiled in as a
+# resource instead.
+if(MINGW)
+  list(APPEND CURSOR_USAGE_SOURCES src/app.rc)
+  # windres does not report the included manifest as a dependency, so editing
+  # app.manifest alone would otherwise link a stale one.
+  set_property(SOURCE src/app.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
+endif()
+
+add_executable(CursorUsage WIN32 ${CURSOR_USAGE_SOURCES})
 
 target_include_directories(CursorUsage PRIVATE src)
 
@@ -25,6 +42,7 @@ target_compile_definitions(CursorUsage PRIVATE
 
 target_link_libraries(CursorUsage PRIVATE
   winhttp
+  advapi32
   gdiplus
   shell32
   ole32
@@ -50,6 +68,10 @@ elseif(MINGW)
     -mwindows
     -municode
   )
+  # std::async/std::thread need the threading runtime pulled in explicitly with
+  # the static winpthread setup used here.
+  find_package(Threads REQUIRED)
+  target_link_libraries(CursorUsage PRIVATE Threads::Threads)
 endif()
 
 install(TARGETS CursorUsage RUNTIME DESTINATION bin)

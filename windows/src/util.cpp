@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -63,6 +64,24 @@ std::optional<std::string> ReadFileUtf8(const std::wstring& path) {
   std::ostringstream ss;
   ss << in.rdbuf();
   return ss.str();
+}
+
+bool WriteFileAtomic(const std::wstring& path, const std::string& data) {
+  const std::wstring temp = path + L".tmp";
+  {
+    std::ofstream out(temp.c_str(), std::ios::binary | std::ios::trunc);
+    if (!out)
+      return false;
+    out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    out.flush();
+    if (!out)
+      return false;
+  }
+  if (MoveFileExW(temp.c_str(), path.c_str(),
+                  MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    return true;
+  DeleteFileW(temp.c_str());
+  return false;
 }
 
 static int B64Val(char c) {
@@ -267,6 +286,75 @@ std::optional<bool> JsonBool(const std::string& json, const std::string& key) {
   return std::nullopt;
 }
 
+JsonSpan JsonValueSpan(const std::string& json, const std::string& key) {
+  JsonSpan span;
+  size_t v = FindKey(json, key);
+  if (v == std::string::npos)
+    return span;
+  v = SkipWs(json, v);
+  if (v >= json.size())
+    return span;
+  span.begin = v;
+  span.end = SkipValue(json, v);
+  span.found = span.end > span.begin;
+  return span;
+}
+
+std::string JsonEscape(const std::string& raw) {
+  std::string out;
+  out.reserve(raw.size() + 8);
+  for (unsigned char c : raw) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (c < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+          out += buf;
+        } else {
+          out.push_back(static_cast<char>(c));
+        }
+    }
+  }
+  return out;
+}
+
+bool JsonSetString(std::string& json, const std::string& key, const std::string& value) {
+  JsonSpan span = JsonValueSpan(json, key);
+  if (!span.found)
+    return false;
+  json.replace(span.begin, span.end - span.begin, "\"" + JsonEscape(value) + "\"");
+  return true;
+}
+
+bool JsonSetNumber(std::string& json, const std::string& key, long long value) {
+  JsonSpan span = JsonValueSpan(json, key);
+  if (!span.found)
+    return false;
+  json.replace(span.begin, span.end - span.begin, std::to_string(value));
+  return true;
+}
+
+int64_t UnixMillisNow() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
 std::string HumanDuration(int64_t seconds) {
   int64_t s = (std::max)(int64_t{0}, seconds);
   if (s < 60)
@@ -301,6 +389,22 @@ static std::optional<std::chrono::system_clock::time_point> ParseIso(const std::
 #endif
   if (t < 0)
     return std::nullopt;
+
+  // Honour an explicit offset; the previous version silently treated
+  // "...T00:00:00+05:00" as UTC and reported resets up to a day out.
+  size_t tzPos = iso.find_first_of("Zz+", 19);
+  if (tzPos == std::string::npos) {
+    size_t dash = iso.find('-', 19);
+    if (dash != std::string::npos)
+      tzPos = dash;
+  }
+  if (tzPos != std::string::npos && iso[tzPos] != 'Z' && iso[tzPos] != 'z') {
+    int oh = 0, om = 0;
+    if (std::sscanf(iso.c_str() + tzPos + 1, "%d:%d", &oh, &om) >= 1) {
+      int offset = oh * 3600 + om * 60;
+      t -= (iso[tzPos] == '-') ? -offset : offset;
+    }
+  }
   return std::chrono::system_clock::from_time_t(t);
 }
 
