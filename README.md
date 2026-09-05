@@ -30,11 +30,11 @@ abandoned rather than risk invalidating the CLI's login.
 
 ### Install
 
-From [releases](https://github.com/669px/AI-Usage-Extension/releases):
+From [releases](https://github.com/byte4day/AI-Usage-Extension/releases):
 
 ```bash
-gnome-extensions install -f cursor-usage@669px.github.io.shell-extension.zip
-gnome-extensions enable cursor-usage@669px.github.io
+gnome-extensions install -f cursor-usage@byte4day.github.io.shell-extension.zip
+gnome-extensions enable cursor-usage@byte4day.github.io
 ```
 
 Reload Shell (Wayland logout, or X11 `Alt+F2` → `r`).

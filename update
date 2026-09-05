@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-uuid="cursor-usage@669px.github.io"
+uuid="cursor-usage@byte4day.github.io"
 target_dir="$HOME/.local/share/gnome-shell/extensions/$uuid"
 
 if [ "$repo_dir" = "$target_dir" ]; then
@@ -11,7 +11,7 @@ if [ "$repo_dir" = "$target_dir" ]; then
 fi
 
 # Remove legacy install path from earlier UUID
-rm -rf "$HOME/.local/share/gnome-shell/extensions/cursor-usage@669px"
+rm -rf "$HOME/.local/share/gnome-shell/extensions/cursor-usage@byte4day"
 
 rm -rf "$target_dir"
 mkdir -p "$(dirname "$target_dir")"

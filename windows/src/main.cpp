@@ -13,8 +13,8 @@ typedef ULONG PROPID;
 
 namespace {
 
-constexpr wchar_t kMutexName[] = L"Local\\CursorUsageWidget.669px";
-constexpr wchar_t kWakeMsgName[] = L"CursorUsageWidget_Wake_669px";
+constexpr wchar_t kMutexName[] = L"Local\\CursorUsageWidget.byte4day";
+constexpr wchar_t kWakeMsgName[] = L"CursorUsageWidget_Wake_byte4day";
 
 void EnableDpiAwareness() {
   using SetCtxFn = BOOL(WINAPI*)(HANDLE);

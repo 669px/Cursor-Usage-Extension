@@ -514,7 +514,7 @@ Widget::Widget(HINSTANCE instance) : instance_(instance) {
   config_.Load();
   expanded_ = !config_.startCompact;
   taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
-  wakeMsg_ = RegisterWindowMessageW(L"CursorUsageWidget_Wake_669px");
+  wakeMsg_ = RegisterWindowMessageW(L"CursorUsageWidget_Wake_byte4day");
 }
 
 Widget::~Widget() {
